@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.10)
 project(ic_gvins)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Optimization
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -O3")
@@ -60,22 +62,38 @@ target_link_libraries(ic_gvins_core
         absl::time)
 
 # ROS interface
-find_package(catkin REQUIRED COMPONENTS
-        message_generation
-        roscpp
-        std_msgs)
-catkin_package(
-        LIBRARIES
-        CATKIN_DEPENDS roscpp std_msgs)
-include_directories(
-        ${catkin_INCLUDE_DIRS})
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 # GVINS ROS with standard messages
 add_executable(${PROJECT_NAME}_ros
         ROS/fusion_ros.cc
         ROS/drawer_rviz.cc)
 
-        add_dependencies(${PROJECT_NAME}_ros ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+ament_target_dependencies(${PROJECT_NAME}_ros
+        rclcpp
+        sensor_msgs
+        nav_msgs
+        geometry_msgs
+        tf2_ros)
 target_link_libraries(${PROJECT_NAME}_ros
-        ${catkin_LIBRARIES}
         ic_gvins_core)
+
+install(TARGETS
+        ic_gvins_core
+        ${PROJECT_NAME}_ros
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION lib/${PROJECT_NAME})
+
+install(DIRECTORY launch
+        DESTINATION share/${PROJECT_NAME})
+
+install(DIRECTORY ../config
+        DESTINATION share/${PROJECT_NAME})
+
+ament_package()

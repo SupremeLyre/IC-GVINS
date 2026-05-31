@@ -30,8 +30,12 @@
 #include <memory>
 #include <mutex>
 
-#include <nav_msgs/Path.h>
-#include <ros/ros.h>
+#include <rclcpp/rclcpp.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
+#include <tf2_ros/transform_broadcaster.h>
 
 using std::string;
 using std::vector;
@@ -39,7 +43,7 @@ using std::vector;
 class DrawerRviz : public Drawer {
 
 public:
-    explicit DrawerRviz(ros::NodeHandle &nh);
+    explicit DrawerRviz(const rclcpp::Node::SharedPtr &node);
 
     void run() override;
 
@@ -51,7 +55,7 @@ public:
     void updateMap(const Eigen::Matrix4d &pose) override;
 
     // 跟踪图像
-    void updateFrame(Frame::Ptr frame) override;
+    void updateFrame(Frame::Ptr frame, const Mat &undistorted_image = Mat()) override;
     void updateTrackedMapPoints(vector<cv::Point2f> map, vector<cv::Point2f> matched,
                                 vector<MapPointType> mappoint_type) override;
     void updateTrackedRefPoints(vector<cv::Point2f> ref, vector<cv::Point2f> cur) override;
@@ -80,15 +84,19 @@ private:
     vector<Vector3d> fixed_mappoints_;
 
     Pose pose_;
-    nav_msgs::Path path_;
+    rclcpp::Node::SharedPtr node_;
+    std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-    ros::Publisher path_pub_;
-    ros::Publisher pose_pub_;
-    ros::Publisher track_image_pub_;
-    ros::Publisher fixed_points_pub_;
-    ros::Publisher current_points_pub_;
+    nav_msgs::msg::Path path_;
+
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pose_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr track_image_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr fixed_points_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr current_points_pub_;
 
     string frame_id_;
+    string body_frame_id_;
 };
 
 #endif // DRAWER_RVIZ_H

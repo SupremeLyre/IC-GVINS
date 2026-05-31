@@ -37,9 +37,9 @@ sudo apt install gcc-8 g++-8
 # sudo apt install clang
 ```
 
-### 1.2 Robot Operating System (ROS)
+### 1.2 Robot Operating System (ROS 2)
 
-Follow [ROS Melodic installation instructions for Ubuntu 18.04](https://wiki.ros.org/melodic/Installation/Ubuntu) and [ROS Noetic installation instructions for Ubuntu 20.04](http://wiki.ros.org/noetic/Installation/Ubuntu).
+Install a ROS 2 distribution with `rclcpp`, `sensor_msgs`, `nav_msgs`, `geometry_msgs`, `tf2_ros`, and `rviz2` available.
 
 ### 1.3 Ceres Solver with its Dependencies
 
@@ -82,11 +82,9 @@ git clone https://github.com/i2Nav-WHU/IC-GVINS.git
 # To gvins_ws directory
 cd ..
 
-# Build the source code using catkin_make
-# For gcc
-catkin_make -j8 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8
-# For clang
-# catkin_make -j8 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+# Build the source code using colcon
+source /opt/ros/<ros2-distro>/setup.bash
+colcon build --packages-select ic_gvins --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 ### 2.2 Run demo dataset
@@ -94,19 +92,21 @@ catkin_make -j8 -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_
 If you have already downloaded the open-sourced dataset, run the following commands.
 
 ```shell
-# Open a terminal and source the workspace environments
+# Open a terminal and source the workspace environment
 # For bash
-source ~/gvins_ws/devel/setup.bash
+source ~/gvins_ws/install/setup.bash
 # For zsh
-# source ~/gvins_ws/devel/setup.zsh
+# source ~/gvins_ws/install/setup.zsh
 
 # Run IC-GVINS node
 # You should change the path in both the configuration file and command line
-roslaunch ic_gvins ic_gvins.launch configfile:=path/urban38/IC-GVINS/gvins.yaml
+ros2 launch ic_gvins ic_gvins.launch.py configfile:=path/urban38/IC-GVINS/gvins.yaml
 
-# Open another terminal to play the ROS bag
-rosbag play path/urban38/urban38.bag
+# Open another terminal to play a ROS 2 bag
+ros2 bag play path/urban38/urban38_ros2_bag
 ```
+
+The original public datasets are ROS 1 `.bag` files, so convert them to ROS 2 bags or bridge the topics before playing them in a ROS 2-only environment.
 
 ## 3 Datasets
 
@@ -116,9 +116,9 @@ We use standard ROS bag for IC-GVINS. The employed messages are as follows:
 
 | Sensor   | Message                                                                                 | Default Topic | KAIST Dataset (Hz) | IC-GVINS Dataset (Hz) |
 | ---------- | ----------------------------------------------------------------------------------------- | --------------- | -------------------- | ----------------------- |
-| Camera   | [sensor_msgs/Image](http://docs.ros.org/en/api/sensor_msgs/html/msg/Image.html)         | /cam0         | 10                 | 20                    |
-| IMU      | [sensor_msgs/Imu](http://docs.ros.org/en/api/sensor_msgs/html/msg/Imu.html)             | /imu0         | 100                | 200                   |
-| GNSS-RTK | [sensor_msgs/NavSatFix](http://docs.ros.org/en/api/sensor_msgs/html/msg/NavSatFix.html) | /gnss0        | 1                  | 1                     |
+| Camera   | sensor_msgs/msg/Image     | /cam0         | 10                 | 20                    |
+| IMU      | sensor_msgs/msg/Imu       | /imu0         | 100                | 200                   |
+| GNSS-RTK | sensor_msgs/msg/NavSatFix | /gnss0        | 1                  | 1                     |
 
 The IMU should be in **front-right-down** format in the IC-GVINS.
 
@@ -154,7 +154,7 @@ You can run IC-GVINS with your self-collected dataset. Keep in mind the followin
 
 1. You should prepare well-synchronized GNSS, Camera, and IMU data in a ROS bag;
 2. The IMU data should be in front-right-down format;
-3. Modify the topic names in the ic_gvins.launch file;
+3. Modify the topic names in the `ic_gvins.launch.py` file;
 4. Modify the parameters in the configuration file.
 
 ### 3.5 Evaluation

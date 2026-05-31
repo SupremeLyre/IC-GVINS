@@ -26,6 +26,7 @@
 #include "common/angle.h"
 #include "common/earth.h"
 #include "common/gpstime.h"
+#include "common/imu_frame.h"
 #include "common/logging.h"
 
 #include "factors/gnss_factor.h"
@@ -115,15 +116,36 @@ GVINS::GVINS(const string &configfile, const string &outputpath, Drawer::Ptr dra
     vector<double> distortion = config["cam0"]["distortion"].as<std::vector<double>>();
     vector<int> resolution    = config["cam0"]["resolution"].as<std::vector<int>>();
 
-    camera_ = Camera::createCamera(intrinsic, distortion, resolution);
+    Camera::ModelType camera_model = Camera::PINHOLE;
+    if (config["cam0"]["camera_model"]) {
+        string model = config["cam0"]["camera_model"].as<string>();
+        if (model == "kannala_brandt8") {
+            camera_model = Camera::KANNALA_BRANDT8;
+        }
+    }
+
+    camera_ = Camera::createCamera(intrinsic, distortion, resolution, camera_model);
 
     // IMU和Camera外参
     // Extrinsic parameters
     vecdata           = config["cam0"]["q_b_c"].as<std::vector<double>>();
-    Quaterniond q_b_c = Eigen::Quaterniond(vecdata.data());
+    Quaterniond q_b_c = Eigen::Quaterniond(vecdata.data()).normalized();
     vecdata           = config["cam0"]["t_b_c"].as<std::vector<double>>();
     Vector3d t_b_c    = Eigen::Vector3d(vecdata.data());
     td_b_c_           = config["cam0"]["td_b_c"].as<double>();
+    bool is_extrinsic_in_raw_imu_frame =
+        config["cam0"]["extrinsic_in_raw_imu_frame"] ? config["cam0"]["extrinsic_in_raw_imu_frame"].as<bool>() : false;
+    if (is_extrinsic_in_raw_imu_frame) {
+        string imu_orientation = "FRD";
+        YAML::Node imu_config  = config["imu"];
+        if (config["imu_orientation"]) {
+            imu_orientation = config["imu_orientation"].as<string>();
+        } else if (imu_config && imu_config["imu_orientation"]) {
+            imu_orientation = imu_config["imu_orientation"].as<string>();
+        }
+        ImuFrame::transformCameraExtrinsicToFrd(imu_orientation, q_b_c, t_b_c);
+        LOGI << "Transform camera extrinsic from raw IMU frame " << imu_orientation << " to internal FRD frame";
+    }
 
     pose_b_c_.R = q_b_c.toRotationMatrix();
     pose_b_c_.t = t_b_c;

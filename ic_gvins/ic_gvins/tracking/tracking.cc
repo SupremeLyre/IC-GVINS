@@ -59,6 +59,23 @@ Tracking::Tracking(Camera::Ptr camera, Map::Ptr map, Drawer::Ptr drawer, const s
     is_use_visualization_   = config["is_use_visualization"].as<bool>();
     reprojection_error_std_ = config["reprojection_error_std"].as<double>();
 
+    // 读入掩膜
+    if (config["cam0"]["mask_file"]) {
+        std::string mask_file = config["cam0"]["mask_file"].as<std::string>();
+        if (!mask_file.empty()) {
+            user_mask_ = cv::imread(mask_file, cv::IMREAD_GRAYSCALE);
+            if (!user_mask_.empty()) {
+                if (user_mask_.size() != camera_->size()) {
+                    LOGE << "Mask size is not equal to camera size";
+                    cv::resize(user_mask_, user_mask_, camera_->size());
+                }
+                LOGI << "Load mask from " << mask_file;
+            } else {
+                LOGE << "Failed to load mask from " << mask_file;
+            }
+        }
+    }
+
     // 直方图均衡化
     clahe_ = cv::createCLAHE(3.0, cv::Size(21, 21));
 
@@ -345,7 +362,10 @@ void Tracking::showTracking() {
         return;
     }
 
-    drawer_->updateFrame(frame_cur_);
+    Mat undistorted_image;
+    camera_->undistortImage(frame_cur_->image(), undistorted_image);
+
+    drawer_->updateFrame(frame_cur_, undistorted_image);
 }
 
 bool Tracking::trackMappoint() {
@@ -607,6 +627,11 @@ void Tracking::featuresDetection(Frame::Ptr &frame, bool ismask) {
 
     // 设置感兴趣区域, 没有特征的区域
     Mat mask = Mat(camera_->size(), CV_8UC1, 255);
+
+    if (!user_mask_.empty()) {
+        cv::bitwise_and(mask, user_mask_, mask);
+    }
+
     if (ismask) {
         // 已经跟踪上的点
         for (const auto &pt : frame_cur_->features()) {

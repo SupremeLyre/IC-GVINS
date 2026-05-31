@@ -25,23 +25,29 @@
 #include "common/logging.h"
 #include "common/rotation.h"
 
-#include <nav_msgs/Odometry.h>
-#include <sensor_msgs/Image.h>
-#include <sensor_msgs/PointCloud.h>
-#include <sensor_msgs/image_encodings.h>
+#include <geometry_msgs/msg/point32.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/transform_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
+#include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
 
-DrawerRviz::DrawerRviz(ros::NodeHandle &nh)
+DrawerRviz::DrawerRviz(const rclcpp::Node::SharedPtr &node)
     : isfinished_(false)
     , isframerdy_(false)
-    , ismaprdy_(false) {
+    , ismaprdy_(false)
+    , node_(node) {
 
     frame_id_ = "world";
+    body_frame_id_ = "gvins_body";
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 
-    pose_pub_           = nh.advertise<nav_msgs::Odometry>("pose", 2);
-    path_pub_           = nh.advertise<nav_msgs::Path>("path", 2);
-    track_image_pub_    = nh.advertise<sensor_msgs::Image>("tracking", 2);
-    fixed_points_pub_   = nh.advertise<sensor_msgs::PointCloud>("fixed", 2);
-    current_points_pub_ = nh.advertise<sensor_msgs::PointCloud>("current", 2);
+    pose_pub_           = node_->create_publisher<nav_msgs::msg::Odometry>("pose", rclcpp::QoS(2));
+    path_pub_           = node_->create_publisher<nav_msgs::msg::Path>("path", rclcpp::QoS(2));
+    track_image_pub_    = node_->create_publisher<sensor_msgs::msg::Image>("tracking", rclcpp::QoS(2));
+    fixed_points_pub_   = node_->create_publisher<sensor_msgs::msg::PointCloud>("fixed", rclcpp::QoS(2));
+    current_points_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud>("current", rclcpp::QoS(2));
 }
 
 void DrawerRviz::setFinished() {
@@ -74,10 +80,14 @@ void DrawerRviz::run() {
     }
 }
 
-void DrawerRviz::updateFrame(Frame::Ptr frame) {
+void DrawerRviz::updateFrame(Frame::Ptr frame, const Mat &undistorted_image) {
     std::unique_lock<std::mutex> lock(image_mutex_);
 
-    frame->image().copyTo(raw_image_);
+    if (!undistorted_image.empty()) {
+        undistorted_image.copyTo(raw_image_);
+    } else {
+        frame->image().copyTo(raw_image_);
+    }
 
     isframerdy_ = true;
     update_sem_.notify_one();
@@ -103,9 +113,9 @@ void DrawerRviz::publishTrackingImage() {
     Mat drawed;
     drawTrackingImage(raw_image_, drawed);
 
-    sensor_msgs::Image image;
+    sensor_msgs::msg::Image image;
 
-    image.header.stamp    = ros::Time::now();
+    image.header.stamp    = node_->now();
     image.header.frame_id = frame_id_;
     image.encoding        = sensor_msgs::image_encodings::BGR8;
     image.height          = drawed.rows;
@@ -116,16 +126,16 @@ void DrawerRviz::publishTrackingImage() {
     image.data.resize(size);
     memcpy(image.data.data(), drawed.data, size);
 
-    track_image_pub_.publish(image);
+    track_image_pub_->publish(image);
 }
 
 void DrawerRviz::publishMapPoints() {
     std::unique_lock<std::mutex> lock(map_mutex_);
 
-    auto stamp = ros::Time::now();
+    auto stamp = node_->now();
 
     // 发布窗口内的路标点
-    sensor_msgs::PointCloud current_pointcloud;
+    sensor_msgs::msg::PointCloud current_pointcloud;
 
     current_pointcloud.header.stamp    = stamp;
     current_pointcloud.header.frame_id = frame_id_;
@@ -133,7 +143,7 @@ void DrawerRviz::publishMapPoints() {
     // 获取当前点云
     for (const auto &local : map_->landmarks()) {
         if (local.second && !local.second->isOutlier()) {
-            geometry_msgs::Point32 point;
+            geometry_msgs::msg::Point32 point;
             point.x = static_cast<float>(local.second->pos().x());
             point.y = static_cast<float>(local.second->pos().y());
             point.z = static_cast<float>(local.second->pos().z());
@@ -141,23 +151,23 @@ void DrawerRviz::publishMapPoints() {
             current_pointcloud.points.push_back(point);
         }
     }
-    current_points_pub_.publish(current_pointcloud);
+    current_points_pub_->publish(current_pointcloud);
 
     // 发布新的地图点
-    sensor_msgs::PointCloud fixed_pointcloud;
+    sensor_msgs::msg::PointCloud fixed_pointcloud;
 
     fixed_pointcloud.header.stamp    = stamp;
     fixed_pointcloud.header.frame_id = frame_id_;
 
     for (const auto &pts : fixed_mappoints_) {
-        geometry_msgs::Point32 point;
+        geometry_msgs::msg::Point32 point;
         point.x = static_cast<float>(pts.x());
         point.y = static_cast<float>(pts.y());
         point.z = static_cast<float>(pts.z());
 
         fixed_pointcloud.points.push_back(point);
     }
-    fixed_points_pub_.publish(fixed_pointcloud);
+    fixed_points_pub_->publish(fixed_pointcloud);
 
     fixed_mappoints_.clear();
 }
@@ -165,14 +175,15 @@ void DrawerRviz::publishMapPoints() {
 void DrawerRviz::publishOdometry() {
     std::unique_lock<std::mutex> lock(map_mutex_);
 
-    nav_msgs::Odometry odometry;
+    nav_msgs::msg::Odometry odometry;
 
     auto quaternion = Rotation::matrix2quaternion(pose_.R);
-    auto stamp      = ros::Time::now();
+    auto stamp      = node_->now();
 
     // Odometry
     odometry.header.stamp            = stamp;
     odometry.header.frame_id         = frame_id_;
+    odometry.child_frame_id          = body_frame_id_;
     odometry.pose.pose.position.x    = pose_.t.x();
     odometry.pose.pose.position.y    = pose_.t.y();
     odometry.pose.pose.position.z    = pose_.t.z();
@@ -180,10 +191,20 @@ void DrawerRviz::publishOdometry() {
     odometry.pose.pose.orientation.y = quaternion.y();
     odometry.pose.pose.orientation.z = quaternion.z();
     odometry.pose.pose.orientation.w = quaternion.w();
-    pose_pub_.publish(odometry);
+    pose_pub_->publish(odometry);
+
+    geometry_msgs::msg::TransformStamped transform;
+    transform.header.stamp            = stamp;
+    transform.header.frame_id         = frame_id_;
+    transform.child_frame_id          = body_frame_id_;
+    transform.transform.translation.x = pose_.t.x();
+    transform.transform.translation.y = pose_.t.y();
+    transform.transform.translation.z = pose_.t.z();
+    transform.transform.rotation      = odometry.pose.pose.orientation;
+    tf_broadcaster_->sendTransform(transform);
 
     // Path
-    geometry_msgs::PoseStamped pose_stamped;
+    geometry_msgs::msg::PoseStamped pose_stamped;
     pose_stamped.header.stamp    = stamp;
     pose_stamped.header.frame_id = frame_id_;
     pose_stamped.pose            = odometry.pose.pose;
@@ -191,7 +212,7 @@ void DrawerRviz::publishOdometry() {
     path_.header.stamp    = stamp;
     path_.header.frame_id = frame_id_;
     path_.poses.push_back(pose_stamped);
-    path_pub_.publish(path_);
+    path_pub_->publish(path_);
 }
 
 void DrawerRviz::addNewFixedMappoint(Vector3d point) {

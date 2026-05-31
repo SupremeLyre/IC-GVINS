@@ -1,17 +1,28 @@
 <?xml version="1.0"?>
-<package format="2">
+<package format="3">
     <name>ic_gvins</name>
     <version>1.0.0</version>
-    <description>The IC-GVINS ROS Interface</description>
+    <description>The IC-GVINS ROS 2 Interface</description>
 
     <license>GPLv3</license>
 
     <maintainer email="thl@whu.edu.cn">hailiang</maintainer>
     <author email="thl@whu.edu.cn">hailiang</author>
 
-    <buildtool_depend>catkin</buildtool_depend>
+    <buildtool_depend>ament_cmake</buildtool_depend>
 
-    <depend>roscpp</depend>
-    <depend>std_msgs</depend>
+    <depend>rclcpp</depend>
+    <depend>sensor_msgs</depend>
+    <depend>nav_msgs</depend>
+    <depend>geometry_msgs</depend>
+    <depend>tf2_ros</depend>
+
+    <exec_depend>launch</exec_depend>
+    <exec_depend>launch_ros</exec_depend>
+    <exec_depend>rviz2</exec_depend>
+
+    <export>
+        <build_type>ament_cmake</build_type>
+    </export>
 
 </package>

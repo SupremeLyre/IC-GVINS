@@ -1,5 +1,5 @@
 Panels:
-  - Class: rviz/Displays
+  - Class: rviz_common/Displays
     Help Height: 94
     Name: Displays
     Property Tree Widget:
@@ -9,12 +9,12 @@ Panels:
         - /GVINS1/Odometry1/Shape1
       Splitter Ratio: 0.6352941393852234
     Tree Height: 315
-  - Class: rviz/Views
+  - Class: rviz_common/Views
     Expanded:
       - /Current View1
     Name: Views
     Splitter Ratio: 0.5
-  - Class: rviz/Time
+  - Class: rviz_common/Time
     Experimental: false
     Name: Time
     SyncMode: 0
@@ -26,11 +26,11 @@ Toolbars:
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz/Group
+    - Class: rviz_common/Group
       Displays:
         - Alpha: 1
           Buffer Length: 1
-          Class: rviz/Path
+          Class: rviz_default_plugins/Path
           Color: 25; 255; 0
           Enabled: true
           Head Diameter: 0.30000001192092896
@@ -53,7 +53,7 @@ Visualization Manager:
           Unreliable: false
           Value: true
         - Angle Tolerance: 0.10000000149011612
-          Class: rviz/Odometry
+          Class: rviz_default_plugins/Odometry
           Covariance:
             Orientation:
               Alpha: 0.5
@@ -95,7 +95,7 @@ Visualization Manager:
             Value: true
           Axis: Z
           Channel Name: intensity
-          Class: rviz/PointCloud
+          Class: rviz_default_plugins/PointCloud
           Color: 255; 0; 0
           Color Transformer: FlatColor
           Decay Time: 0
@@ -123,7 +123,7 @@ Visualization Manager:
             Value: true
           Axis: Z
           Channel Name: intensity
-          Class: rviz/PointCloud
+          Class: rviz_default_plugins/PointCloud
           Color: 255; 255; 255
           Color Transformer: FlatColor
           Decay Time: 200
@@ -143,21 +143,24 @@ Visualization Manager:
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
-        - Class: rviz/Image
+        - Class: rviz_default_plugins/Image
           Enabled: true
-          Image Topic: /tracking
           Max Value: 1
           Median window: 5
           Min Value: 0
           Name: Tracking
           Normalize Range: true
-          Queue Size: 2
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /tracking
           Transport Hint: raw
-          Unreliable: false
           Value: true
         - Alpha: 0.5
           Cell Size: 1
-          Class: rviz/Grid
+          Class: rviz_default_plugins/Grid
           Color: 160; 160; 164
           Enabled: true
           Line Style:
@@ -173,17 +176,20 @@ Visualization Manager:
           Plane Cell Count: 10
           Reference Frame: <Fixed Frame>
           Value: true
-        - Class: rviz/Image
+        - Class: rviz_default_plugins/Image
           Enabled: false
-          Image Topic: /avt_camera/cam0
           Max Value: 1
           Median window: 5
           Min Value: 0
           Name: Image
           Normalize Range: true
-          Queue Size: 2
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /avt_camera/cam0
           Transport Hint: raw
-          Unreliable: false
           Value: false
       Enabled: true
       Name: GVINS
@@ -195,45 +201,45 @@ Visualization Manager:
     Frame Rate: 30
   Name: root
   Tools:
-    - Class: rviz/Interact
+    - Class: rviz_default_plugins/Interact
       Hide Inactive Objects: true
-    - Class: rviz/MoveCamera
-    - Class: rviz/Select
-    - Class: rviz/FocusCamera
-    - Class: rviz/Measure
-    - Class: rviz/SetInitialPose
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
       Theta std deviation: 0.2617993950843811
       Topic: /initialpose
       X std deviation: 0.5
       Y std deviation: 0.5
-    - Class: rviz/SetGoal
+    - Class: rviz_default_plugins/SetGoal
       Topic: /move_base_simple/goal
-    - Class: rviz/PublishPoint
+    - Class: rviz_default_plugins/PublishPoint
       Single click: true
       Topic: /clicked_point
   Value: true
   Views:
     Current:
-      Class: rviz/Orbit
-      Distance: 227.1197509765625
+      Class: rviz_default_plugins/Orbit
+      Distance: 159.83700561523438
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
-      Field of View: 0.7853981852531433
       Focal Point:
-        X: -1.1569712162017822
-        Y: -0.014375507831573486
-        Z: -1.1057406663894653
+        X: 0.08899614214897156
+        Y: -0.8157966732978821
+        Z: -2.2428393363952637
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
       Pitch: 1.5697963237762451
-      Target Frame: <Fixed Frame>
-      Yaw: 3.1281380653381348
+      Target Frame: gvins_body
+      Value: Orbit (rviz)
+      Yaw: 3.1395297050476074
     Saved: ~
 Window Geometry:
   Displays:

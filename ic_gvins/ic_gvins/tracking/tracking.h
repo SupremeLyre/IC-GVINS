@@ -162,6 +162,8 @@ private:
 
     bool is_use_visualization_;
 
+    cv::Mat user_mask_;
+
     FileSaver::Ptr logfilesaver_;
 
     TimeCost timecost_;

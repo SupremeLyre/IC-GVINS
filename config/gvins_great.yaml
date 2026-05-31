@@ -1,0 +1,78 @@
+# IC-GVINS configuration for GREAT-Dataset campus-01
+
+# Output directory
+outputpath: /mnt/nvme1/datasets/GREAT-Dataset/campus-01/IC-GVINS
+is_make_outputdir: true
+
+# Time length for GNSS/INS initialization, s
+initlength: 1
+
+# IMU sample rate, Hz
+imudatarate: 100
+
+# IMU raw frame orientation, converted internally to FRD
+imu_orientation: "RFU"
+
+# Consider the Earth rotation
+iswithearth: true
+
+# GNSS lever-arm in IMU body frame (front-right-down), m
+# Estimated from the static beginning of campus-01 GNSS/groundtruth.
+antlever: [-0.650, -0.050, -0.150]
+
+# IMU noise parameters
+imumodel:
+    arw: 0.3        # deg/sqrt(hr)
+    vrw: 0.3        # m/s/sqrt(hr)
+    gbstd: 10.0     # deg/hr
+    abstd: 100.0    # mGal
+    corrtime: 1.0   # hr
+
+# GNSS outage configurations
+isusegnssoutage: false
+gnssoutagetime: 0
+
+# A fixed threshold (STD, m) for GNSS outlier culling
+gnssthreshold: 20
+
+# Use visualization
+is_use_visualization: true
+
+# Tracking configurations
+track_check_histogram: false
+track_min_parallax: 20
+track_max_interval: 0.5
+track_max_features: 250
+
+# Optimization configurations
+reprojection_error_std: 1.5
+optimize_windows_size: 10
+optimize_num_iterations: 20
+optimize_estimate_extrinsic: true
+optimize_estimate_td: true
+
+# Camera parameters
+cam0:
+    camera_model: pinhole
+    mask_file: ""
+
+    # Intrinsic parameters [fx, fy, cx, cy(, skew)]
+    intrinsic: [1155.3798161925529, 1157.6537409838597, 514.5749725873566, 398.0837659988261]
+
+    # Distortion parameters [k1, k2, p1, p2(, k3)]
+    distortion: [-0.08116121408175185, 0.3634445516554271, 0.00015894104082034115,
+        0.0007295381347354688]
+
+    # Resolution
+    resolution: [1024, 768]
+
+    # Camera-IMU extrinsic: Pb = q_b_c * Pc + t_b_c
+    # This calibration is in the raw RFU IMU frame and will be converted to FRD.
+    extrinsic_in_raw_imu_frame: true
+
+    # q (x, y, z, w)
+    q_b_c: [-0.701039936007847, -0.00315801794262976, 0.000220872323511978, 0.713114988105148]
+    t_b_c: [0.1533, -0.1960, -0.0535]
+
+    # t_i = t_c + td
+    td_b_c: 0.0

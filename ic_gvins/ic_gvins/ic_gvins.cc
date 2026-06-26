@@ -35,9 +35,11 @@
 #include "factors/pose_parameterization.h"
 #include "factors/reprojection_factor.h"
 #include "factors/residual_block_info.h"
+#include "factors/time_delay_factor.h"
 #include "preintegration/imu_error_factor.h"
 #include "preintegration/imu_mix_prior_factor.h"
 #include "preintegration/imu_pose_prior_factor.h"
+#include "preintegration/imu_zero_velocity_factor.h"
 #include "preintegration/preintegration.h"
 #include "preintegration/preintegration_factor.h"
 
@@ -81,6 +83,9 @@ GVINS::GVINS(const string &configfile, const string &outputpath, Drawer::Ptr dra
     imudatarate_      = config["imudatarate"].as<double>();
     imudatadt_        = 1.0 / imudatarate_;
     reserved_ins_num_ = 2;
+    if (config["imu"] && config["imu"]["is_use_zupt"]) {
+        is_use_zupt_ = config["imu"]["is_use_zupt"].as<bool>();
+    }
 
     // 安装参数
     // Installation parameters
@@ -155,8 +160,11 @@ GVINS::GVINS(const string &configfile, const string &outputpath, Drawer::Ptr dra
     reprojection_error_std_      = config["reprojection_error_std"].as<double>();
     optimize_estimate_extrinsic_ = config["optimize_estimate_extrinsic"].as<bool>();
     optimize_estimate_td_        = config["optimize_estimate_td"].as<bool>();
-    optimize_num_iterations_     = config["optimize_num_iterations"].as<int>();
-    optimize_windows_size_       = config["optimize_windows_size"].as<size_t>();
+    if (config["optimize_cam_extrinsic_accurate"]) {
+        optimize_cam_extrinsic_accurate_ = config["optimize_cam_extrinsic_accurate"].as<bool>();
+    }
+    optimize_num_iterations_ = config["optimize_num_iterations"].as<int>();
+    optimize_windows_size_   = config["optimize_windows_size"].as<size_t>();
 
     // 归一化相机坐标系下
     // Reprojection std
@@ -1194,6 +1202,11 @@ bool GVINS::gvinsOptimization() {
     // The visual reprojection factors
     auto residual_ids = addReprojectionFactors(problem, true);
 
+    if (is_use_prior_ && optimize_estimate_extrinsic_) {
+        auto factor = new ImuPosePriorFactor(extrinsic_prior_, extrinsic_prior_std_);
+        problem.AddResidualBlock(factor, nullptr, extrinsic_);
+    }
+
     LOGI << "Add " << preintegrationlist_.size() << " preintegration, " << gnsslist_.size() << " GNSS, "
          << residual_ids.size() << " reprojection";
 
@@ -1327,7 +1340,13 @@ void GVINS::updateParametersFromOptimizer() {
     // Update the extrinsic first
     {
         if (optimize_estimate_td_) {
-            td_b_c_ = extrinsic_[7];
+            td_b_c_ = map_->latestKeyFrame()->timeDelayEst();
+            if (fabs(td_b_c_) > 0.2) {
+                LOGW << "Estimate large td_b_c " << Logging::doubleData(td_b_c_) << ", and td_b_c is reset";
+                td_b_c_ = 0;
+                map_->latestKeyFrame()->timeDelayEst() = td_b_c_;
+            }
+            extrinsic_[7] = td_b_c_;
         }
 
         if (optimize_estimate_extrinsic_) {
@@ -1466,8 +1485,11 @@ bool GVINS::gvinsMarginalization() {
 
         // 外参参数
         // Extrinsic parameters
-        parameters_ids[reinterpret_cast<long>(extrinsic_)]     = parameters_id++;
-        parameters_ids[reinterpret_cast<long>(extrinsic_ + 7)] = parameters_id++;
+        parameters_ids[reinterpret_cast<long>(extrinsic_)] = parameters_id++;
+        for (size_t k = 0; k < keyframeids.size(); k++) {
+            auto frame = map_->keyframes().at(keyframeids[k]);
+            parameters_ids[reinterpret_cast<long>(&frame->timeDelayEst())] = parameters_id++;
+        }
 
         // 位姿参数
         // Pose parameters
@@ -1509,6 +1531,15 @@ bool GVINS::gvinsMarginalization() {
                 if (last_marginalization_parameter_blocks_[k] == statedatalist_[i].pose ||
                     last_marginalization_parameter_blocks_[k] == statedatalist_[i].mix) {
                     marginalized_index.push_back((int) k);
+                }
+            }
+        }
+
+        if (optimize_estimate_td_) {
+            for (size_t k = 0; k < last_marginalization_parameter_blocks_.size(); k++) {
+                if (last_marginalization_parameter_blocks_[k] == &map_->keyframes().at(keyframeids[0])->timeDelayEst()) {
+                    marginalized_index.push_back((int) k);
+                    break;
                 }
             }
         }
@@ -1567,6 +1598,13 @@ bool GVINS::gvinsMarginalization() {
             mix_factor, nullptr, std::vector<double *>{statedatalist_[0].mix}, vector<int>{0});
         marginalization_info->addResidualBlockInfo(mix_residual);
 
+        if (optimize_estimate_extrinsic_) {
+            auto extrinsic_factor   = std::make_shared<ImuPosePriorFactor>(extrinsic_prior_, extrinsic_prior_std_);
+            auto extrinsic_residual = std::make_shared<ResidualBlockInfo>(
+                extrinsic_factor, nullptr, std::vector<double *>{extrinsic_}, vector<int>{});
+            marginalization_info->addResidualBlockInfo(extrinsic_residual);
+        }
+
         is_use_prior_ = false;
     }
 
@@ -1622,11 +1660,24 @@ bool GVINS::gvinsMarginalization() {
             auto factor = std::make_shared<ReprojectionFactor>(
                 ref_frame_pc, obs_frame_pc, ref_feature->velocityInPixel(), obs_feature->velocityInPixel(),
                 ref_frame->timeDelay(), obs_frame->timeDelay(), optimize_reprojection_error_std_);
-            auto residual = std::make_shared<ResidualBlockInfo>(factor, nullptr,
-                                                                vector<double *>{statedatalist_[ref_frame_index].pose,
-                                                                                 statedatalist_[obs_frame_index].pose,
-                                                                                 extrinsic_, invdepth, &extrinsic_[7]},
-                                                                vector<int>{0, 3});
+            auto residual = std::make_shared<ResidualBlockInfo>(
+                factor, nullptr,
+                vector<double *>{statedatalist_[ref_frame_index].pose, statedatalist_[obs_frame_index].pose,
+                                 extrinsic_, invdepth, &ref_frame->timeDelayEst(), &obs_frame->timeDelayEst()},
+                vector<int>{0, 3, 4});
+            marginalization_info->addResidualBlockInfo(residual);
+        }
+    }
+
+    if (optimize_estimate_td_) {
+        auto frame_pre = map_->keyframes().at(keyframeids[0]);
+        auto frame_cur = map_->keyframes().at(keyframeids[1]);
+        double interval = frame_cur->stamp() - frame_pre->stamp();
+        if (interval > 0.0) {
+            auto factor   = std::make_shared<TimeDelayFactor>(interval);
+            auto residual = std::make_shared<ResidualBlockInfo>(
+                factor, nullptr, vector<double *>{&frame_pre->timeDelayEst(), &frame_cur->timeDelayEst()},
+                vector<int>{0});
             marginalization_info->addResidualBlockInfo(residual);
         }
     }
@@ -1642,8 +1693,11 @@ bool GVINS::gvinsMarginalization() {
         address[parameters_ids[reinterpret_cast<long>(statedatalist_[k].pose)]] = statedatalist_[k].pose;
         address[parameters_ids[reinterpret_cast<long>(statedatalist_[k].mix)]]  = statedatalist_[k].mix;
     }
-    address[parameters_ids[reinterpret_cast<long>(extrinsic_)]]     = extrinsic_;
-    address[parameters_ids[reinterpret_cast<long>(extrinsic_ + 7)]] = &extrinsic_[7];
+    address[parameters_ids[reinterpret_cast<long>(extrinsic_)]] = extrinsic_;
+    for (size_t k = 1; k < keyframeids.size(); k++) {
+        auto frame = map_->keyframes().at(keyframeids[k]);
+        address[parameters_ids[reinterpret_cast<long>(&frame->timeDelayEst())]] = &frame->timeDelayEst();
+    }
 
     last_marginalization_parameter_blocks_ = marginalization_info->getParamterBlocks(address);
     last_marginalization_info_             = std::move(marginalization_info);
@@ -1717,7 +1771,7 @@ void GVINS::doReintegration() {
 }
 
 void GVINS::addReprojectionParameters(ceres::Problem &problem) {
-    if (map_->landmarks().empty()) {
+    if (map_->keyframes().empty()) {
         return;
     }
 
@@ -1776,9 +1830,11 @@ void GVINS::addReprojectionParameters(ceres::Problem &problem) {
     // 时间延时
     // Time delay
     extrinsic_[7] = td_b_c_;
-    problem.AddParameterBlock(&extrinsic_[7], 1);
-    if (!optimize_estimate_td_ || gvinsstate_ != GVINS_TRACKING_NORMAL) {
-        problem.SetParameterBlockConstant(&extrinsic_[7]);
+    for (auto &keyframe : map_->keyframes()) {
+        problem.AddParameterBlock(&keyframe.second->timeDelayEst(), 1);
+        if (!optimize_estimate_td_ || gvinsstate_ != GVINS_TRACKING_NORMAL) {
+            problem.SetParameterBlockConstant(&keyframe.second->timeDelayEst());
+        }
     }
 }
 
@@ -1848,10 +1904,23 @@ vector<ceres::ResidualBlockId> GVINS::addReprojectionFactors(ceres::Problem &pro
             auto factor = new ReprojectionFactor(ref_frame_pc, obs_frame_pc, ref_feature->velocityInPixel(),
                                                  obs_feature->velocityInPixel(), ref_frame->timeDelay(),
                                                  obs_frame->timeDelay(), optimize_reprojection_error_std_);
-            auto residual_block_id =
-                problem.AddResidualBlock(factor, loss_function, statedatalist_[ref_frame_index].pose,
-                                         statedatalist_[obs_frame_index].pose, extrinsic_, invdepth, &extrinsic_[7]);
+            auto residual_block_id = problem.AddResidualBlock(
+                factor, loss_function, statedatalist_[ref_frame_index].pose, statedatalist_[obs_frame_index].pose,
+                extrinsic_, invdepth, &ref_frame->timeDelayEst(), &obs_frame->timeDelayEst());
             residual_ids.push_back(residual_block_id);
+        }
+    }
+
+    if (optimize_estimate_td_) {
+        auto keyframeids = map_->orderedKeyFrames();
+        for (size_t k = 0; k + 1 < keyframeids.size(); k++) {
+            auto frame_pre = map_->keyframes().at(keyframeids[k]);
+            auto frame_cur = map_->keyframes().at(keyframeids[k + 1]);
+            double interval = frame_cur->stamp() - frame_pre->stamp();
+            if (interval > 0.0) {
+                auto factor = new TimeDelayFactor(interval);
+                problem.AddResidualBlock(factor, nullptr, &frame_pre->timeDelayEst(), &frame_cur->timeDelayEst());
+            }
         }
     }
 
@@ -1898,6 +1967,15 @@ void GVINS::addImuFactors(ceres::Problem &problem) {
     // IMU error factor
     auto factor = new ImuErrorFactor(preintegration_options_);
     problem.AddResidualBlock(factor, nullptr, statedatalist_[preintegrationlist_.size()].mix);
+
+    if (is_use_zupt_ && !preintegrationlist_.empty()) {
+        vector<double> average;
+        if (MISC::detectZeroVelocity(preintegrationlist_.back()->imuBuffer(), imudatarate_, average)) {
+            LOGI << "Zero velocity is detected at " << Logging::doubleData(statedatalist_.back().time);
+            auto zero_velocity_factor = new ImuZeroVelocityFactor(preintegration_options_, ZERO_VELOCITY_STD);
+            problem.AddResidualBlock(zero_velocity_factor, nullptr, statedatalist_.back().mix);
+        }
+    }
 
     // IMU初始先验因子, 仅限于初始化
     // IMU prior factor, only for initialization
@@ -1954,5 +2032,31 @@ void GVINS::constructPrior(bool is_zero_velocity) {
     }
     pose_prior_std_[5] = att_prior_std * 3; // heading
     mix_prior_std_[9]  = sodo_prior_std;
-    is_use_prior_      = true;
+
+    if (optimize_estimate_extrinsic_) {
+        if (optimize_cam_extrinsic_accurate_) {
+            pos_prior_std = 0.05;      // 0.05 m
+            att_prior_std = 0.1 * D2R; // 0.1 deg
+        } else {
+            pos_prior_std = 0.1;       // 0.1 m
+            att_prior_std = 1.0 * D2R; // 1.0 deg
+        }
+
+        Quaterniond q_b_c = Rotation::matrix2quaternion(pose_b_c_.R);
+        q_b_c.normalize();
+        extrinsic_prior_[0] = pose_b_c_.t[0];
+        extrinsic_prior_[1] = pose_b_c_.t[1];
+        extrinsic_prior_[2] = pose_b_c_.t[2];
+        extrinsic_prior_[3] = q_b_c.x();
+        extrinsic_prior_[4] = q_b_c.y();
+        extrinsic_prior_[5] = q_b_c.z();
+        extrinsic_prior_[6] = q_b_c.w();
+
+        for (size_t k = 0; k < 3; k++) {
+            extrinsic_prior_std_[k + 0] = pos_prior_std;
+            extrinsic_prior_std_[k + 3] = att_prior_std;
+        }
+    }
+
+    is_use_prior_ = true;
 }

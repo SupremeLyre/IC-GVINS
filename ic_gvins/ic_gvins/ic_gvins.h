@@ -135,6 +135,10 @@ private:
     // Maximum length for IMU preintegration
     const double MAXIMUM_PREINTEGRATION_LENGTH = 10.0;
 
+    // 零速约束速度标准差
+    // Zero-velocity factor velocity STD
+    const double ZERO_VELOCITY_STD = 0.03;
+
     // 先验标准差
     // The prior STD for IMU biases
     const double GYROSCOPE_BIAS_PRIOR_STD     = 7200 * D2R / 3600; // 7200 deg/hr
@@ -163,6 +167,8 @@ private:
     double mix_prior_std_[18];
     double pose_prior_[7];
     double pose_prior_std_[6];
+    double extrinsic_prior_[7];
+    double extrinsic_prior_std_[6];
 
     // 融合对象
     // GVINS fusion objects
@@ -224,6 +230,7 @@ private:
     double imudatarate_{200};
     double imudatadt_{0.005};
     size_t reserved_ins_num_;
+    bool is_use_zupt_{false};
 
     Vector3d antlever_;
 
@@ -243,6 +250,7 @@ private:
     // Optimization options
     bool optimize_estimate_extrinsic_;
     bool optimize_estimate_td_;
+    bool optimize_cam_extrinsic_accurate_{false};
     double optimize_reprojection_error_std_;
     int optimize_num_iterations_;
     size_t optimize_windows_size_;

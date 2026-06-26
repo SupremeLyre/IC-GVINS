@@ -23,9 +23,6 @@ def generate_launch_description():
                 output="screen",
                 parameters=[
                     {
-                        "imu_topic": "/imu0",
-                        "gnss_topic": "/gnss0",
-                        "image_topic": "/cam0",
                         "configfile": configfile,
                     }
                 ],

@@ -125,8 +125,13 @@ public:
         return td_;
     }
 
+    double &timeDelayEst() {
+        return td_est_;
+    }
+
     void setTimeDelay(double td) {
-        td_ = td;
+        td_     = td;
+        td_est_ = td;
     }
 
     bool isKeyFrame() const {
@@ -162,7 +167,7 @@ private:
     ulong keyframe_id_;
 
     double stamp_;
-    double td_{0};
+    double td_{0}, td_est_{0};
 
     Pose pose_;
 

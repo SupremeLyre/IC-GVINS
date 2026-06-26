@@ -32,6 +32,9 @@ Frame::Frame(ulong id, double stamp, Mat image)
     unupdated_mappoints_.clear();
 
     image_.copyTo(raw_image_);
+    if (image_.channels() == 3) {
+        cv::cvtColor(image_, image_, cv::COLOR_BGR2GRAY);
+    }
 }
 
 Frame::Ptr Frame::createFrame(double stamp, const Mat &image) {

@@ -28,6 +28,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
@@ -51,6 +52,8 @@ private:
 
     void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imagemsg);
 
+    void compressedImageCallback(const sensor_msgs::msg::CompressedImage::ConstSharedPtr imagemsg);
+
 private:
     std::shared_ptr<GVINS> gvins_;
 
@@ -60,6 +63,7 @@ private:
     GNSS gnss_;
 
     bool isusegnssoutage_{false};
+    bool use_compressed_image_{false};
     double gnssoutagetime_{0};
     double gnssthreshold_{20.0};
 

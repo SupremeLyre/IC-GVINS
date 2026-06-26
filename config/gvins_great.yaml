@@ -49,6 +49,7 @@ reprojection_error_std: 1.5
 optimize_windows_size: 10
 optimize_num_iterations: 20
 optimize_estimate_extrinsic: true
+optimize_cam_extrinsic_accurate: false # Tighter camera-IMU extrinsic prior if the initial calibration is accurate
 optimize_estimate_td: true
 
 # Camera parameters

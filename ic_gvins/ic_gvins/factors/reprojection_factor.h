@@ -33,7 +33,7 @@ using Eigen::Matrix3d;
 using Eigen::Quaterniond;
 using Eigen::Vector3d;
 
-class ReprojectionFactor : public ceres::SizedCostFunction<2, 7, 7, 7, 1, 1> {
+class ReprojectionFactor : public ceres::SizedCostFunction<2, 7, 7, 7, 1, 1, 1> {
 
 public:
     ReprojectionFactor() = delete;
@@ -68,10 +68,11 @@ public:
         double id0 = parameters[3][0];
 
         // 时间延时
-        double td = parameters[4][0];
+        double td0 = parameters[4][0];
+        double td1 = parameters[5][0];
 
-        Eigen::Vector3d pts_0_td = pts0_ - (td - td0_) * vel0_;
-        Eigen::Vector3d pts_1_td = pts1_ - (td - td1_) * vel1_;
+        Eigen::Vector3d pts_0_td = pts0_ - (td0 - td0_) * vel0_;
+        Eigen::Vector3d pts_1_td = pts1_ - (td1 - td1_) * vel1_;
 
         Eigen::Vector3d pts_c_0 = pts_0_td / id0;
         Eigen::Vector3d pts_b_0 = qic * pts_c_0 + tic;
@@ -139,7 +140,12 @@ public:
 
             if (jacobians[4]) {
                 Eigen::Map<Eigen::Vector2d> jacobian_td(jacobians[4]);
-                jacobian_td = -reduce * cbc * cnb1 * cb0n * cbc.transpose() * vel0_ / id0 + sqrt_info_ * vel1_.head(2);
+                jacobian_td = -reduce * cbc * cnb1 * cb0n * cbc.transpose() * vel0_ / id0;
+            }
+
+            if (jacobians[5]) {
+                Eigen::Map<Eigen::Vector2d> jacobian_td(jacobians[5]);
+                jacobian_td = sqrt_info_ * vel1_.head(2);
             }
         }
 

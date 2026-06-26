@@ -33,6 +33,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <boost/filesystem.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <sensor_msgs/image_encodings.hpp>
 
 #include <atomic>
@@ -56,15 +57,6 @@ void FusionROS::setFinished() {
 void FusionROS::run() {
     auto node = std::make_shared<rclcpp::Node>("gvins_node");
 
-    // message topic
-    string imu_topic, gnss_topic, image_topic, livox_topic;
-    node->declare_parameter<string>("imu_topic", "/imu0");
-    node->declare_parameter<string>("gnss_topic", "/gnss0");
-    node->declare_parameter<string>("image_topic", "/cam0");
-    node->get_parameter("imu_topic", imu_topic);
-    node->get_parameter("gnss_topic", gnss_topic);
-    node->get_parameter("image_topic", image_topic);
-
     // GVINS parameter
     string configfile;
     node->declare_parameter<string>("configfile", "gvins.yaml");
@@ -81,6 +73,28 @@ void FusionROS::run() {
     }
     auto outputpath        = config["outputpath"].as<string>();
     auto is_make_outputdir = config["is_make_outputdir"].as<bool>();
+
+    // message topic
+    string imu_topic   = "/imu0";
+    string gnss_topic  = "/gnss0";
+    string image_topic = "/cam0";
+    if (config["ros"]) {
+        if (config["ros"]["imu_topic"]) {
+            imu_topic = config["ros"]["imu_topic"].as<string>();
+        }
+        if (config["ros"]["gnss_topic"]) {
+            gnss_topic = config["ros"]["gnss_topic"].as<string>();
+        }
+        if (config["ros"]["image_topic"]) {
+            image_topic = config["ros"]["image_topic"].as<string>();
+        }
+    }
+    node->declare_parameter<string>("imu_topic", imu_topic);
+    node->declare_parameter<string>("gnss_topic", gnss_topic);
+    node->declare_parameter<string>("image_topic", image_topic);
+    node->get_parameter("imu_topic", imu_topic);
+    node->get_parameter("gnss_topic", gnss_topic);
+    node->get_parameter("image_topic", image_topic);
 
     // Create the output directory
     boost::system::error_code filesystem_error;
@@ -109,6 +123,9 @@ void FusionROS::run() {
     isusegnssoutage_ = config["isusegnssoutage"].as<bool>();
     gnssoutagetime_  = config["gnssoutagetime"].as<double>();
     gnssthreshold_   = config["gnssthreshold"].as<double>();
+    if (config["ros"] && config["ros"]["use_compressed_image"]) {
+        use_compressed_image_ = config["ros"]["use_compressed_image"].as<bool>();
+    }
 
     YAML::Node imu_config = config["imu"];
     if (config["imu_orientation"]) {
@@ -146,8 +163,15 @@ void FusionROS::run() {
         imu_topic, imu_qos, std::bind(&FusionROS::imuCallback, this, std::placeholders::_1));
     auto gnss_sub = node->create_subscription<sensor_msgs::msg::NavSatFix>(
         gnss_topic, gnss_qos, std::bind(&FusionROS::gnssCallback, this, std::placeholders::_1));
-    auto image_sub = node->create_subscription<sensor_msgs::msg::Image>(
-        image_topic, image_qos, std::bind(&FusionROS::imageCallback, this, std::placeholders::_1));
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub;
+    rclcpp::Subscription<sensor_msgs::msg::CompressedImage>::SharedPtr compressed_image_sub;
+    if (use_compressed_image_) {
+        compressed_image_sub = node->create_subscription<sensor_msgs::msg::CompressedImage>(
+            image_topic, image_qos, std::bind(&FusionROS::compressedImageCallback, this, std::placeholders::_1));
+    } else {
+        image_sub = node->create_subscription<sensor_msgs::msg::Image>(
+            image_topic, image_qos, std::bind(&FusionROS::imageCallback, this, std::placeholders::_1));
+    }
 
     LOGI << "Waiting ROS message...";
 
@@ -234,6 +258,35 @@ void FusionROS::gnssCallback(const sensor_msgs::msg::NavSatFix::ConstSharedPtr g
     }
 }
 
+namespace {
+
+bool addImageFrameToGvins(std::shared_ptr<GVINS> &gvins, std::queue<Frame::Ptr> &frame_buffer, Frame::Ptr &last_frame,
+                          const Mat &image, double unixsecond) {
+    if (image.empty()) {
+        LOGE << "Empty image message";
+        return false;
+    }
+
+    double weeksec;
+    int week;
+    GpsTime::unix2gps(unixsecond, week, weeksec);
+
+    last_frame = Frame::createFrame(weeksec, image);
+
+    frame_buffer.push(last_frame);
+    while (!frame_buffer.empty()) {
+        auto frame = frame_buffer.front();
+        if (gvins->addNewFrame(frame)) {
+            frame_buffer.pop();
+        } else {
+            break;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 void FusionROS::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imagemsg) {
     Mat image;
 
@@ -241,28 +294,34 @@ void FusionROS::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imag
     if (imagemsg->encoding == sensor_msgs::image_encodings::MONO8) {
         image = Mat(static_cast<int>(imagemsg->height), static_cast<int>(imagemsg->width), CV_8UC1);
         memcpy(image.data, imagemsg->data.data(), imagemsg->height * imagemsg->width);
-    } else if (imagemsg->encoding == sensor_msgs::image_encodings::BGR8) {
+    } else if ((imagemsg->encoding == sensor_msgs::image_encodings::BGR8) ||
+               (imagemsg->encoding == sensor_msgs::image_encodings::RGB8)) {
         image = Mat(static_cast<int>(imagemsg->height), static_cast<int>(imagemsg->width), CV_8UC3);
         memcpy(image.data, imagemsg->data.data(), imagemsg->height * imagemsg->width * 3);
+        if (imagemsg->encoding == sensor_msgs::image_encodings::RGB8) {
+            cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+        }
+    } else {
+        LOGE << "Unsupported image encoding " << imagemsg->encoding;
+        return;
     }
 
-    // Time convertion
     double unixsecond = rclcpp::Time(imagemsg->header.stamp).seconds();
-    double weeksec;
-    int week;
-    GpsTime::unix2gps(unixsecond, week, weeksec);
+    if (!addImageFrameToGvins(gvins_, frame_buffer_, frame_, image, unixsecond)) {
+        return;
+    }
 
-    // Add new Image to GVINS
-    frame_ = Frame::createFrame(weeksec, image);
+    LOG_EVERY_N(INFO, 20) << "Raw data time " << Logging::doubleData(imu_.time) << ", "
+                          << Logging::doubleData(gnss_.time) << ", " << Logging::doubleData(frame_->stamp());
+}
 
-    frame_buffer_.push(frame_);
-    while (!frame_buffer_.empty()) {
-        auto frame = frame_buffer_.front();
-        if (gvins_->addNewFrame(frame)) {
-            frame_buffer_.pop();
-        } else {
-            break;
-        }
+void FusionROS::compressedImageCallback(const sensor_msgs::msg::CompressedImage::ConstSharedPtr imagemsg) {
+    Mat encoded(1, static_cast<int>(imagemsg->data.size()), CV_8UC1, const_cast<uint8_t *>(imagemsg->data.data()));
+    Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+
+    double unixsecond = rclcpp::Time(imagemsg->header.stamp).seconds();
+    if (!addImageFrameToGvins(gvins_, frame_buffer_, frame_, image, unixsecond)) {
+        return;
     }
 
     LOG_EVERY_N(INFO, 20) << "Raw data time " << Logging::doubleData(imu_.time) << ", "

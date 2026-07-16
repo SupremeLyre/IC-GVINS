@@ -4,6 +4,14 @@
 outputpath: /mnt/nvme1/datasets/GREAT-Dataset/campus-01/IC-GVINS
 is_make_outputdir: true
 
+# ROS接口配置
+ros:
+    gnss_topic: "/gnss"
+    imu_topic: "/imu_raw"
+    image_topic: "/img0_raw"
+    lidar_topic: "/points_raw"
+    use_compressed_image: false # 使用压缩图像
+
 # Time length for GNSS/INS initialization, s
 initlength: 1
 
@@ -22,11 +30,11 @@ antlever: [-0.650, -0.050, -0.150]
 
 # IMU noise parameters
 imumodel:
-    arw: 0.3        # deg/sqrt(hr)
-    vrw: 0.3        # m/s/sqrt(hr)
-    gbstd: 10.0     # deg/hr
-    abstd: 100.0    # mGal
-    corrtime: 1.0   # hr
+    arw: 1.0 # deg/sqrt(hr)
+    vrw: 0.8 # m/s/sqrt(hr)
+    gbstd: 100.0 # deg/hr
+    abstd: 1000.0 # mGal
+    corrtime: 1.0 # hr
 
 # GNSS outage configurations
 isusegnssoutage: false

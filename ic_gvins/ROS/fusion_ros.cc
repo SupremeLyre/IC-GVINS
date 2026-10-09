@@ -34,7 +34,6 @@
 
 #include <boost/filesystem.hpp>
 #include <opencv2/imgcodecs.hpp>
-#include <sensor_msgs/image_encodings.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -55,12 +54,21 @@ void FusionROS::setFinished() {
 }
 
 void FusionROS::run() {
+#if ROS_AVAILABLE == 1
+    ros::NodeHandle node;
+    ros::NodeHandle private_node("~");
+#else
     auto node = std::make_shared<rclcpp::Node>("gvins_node");
+#endif
 
     // GVINS parameter
     string configfile;
+#if ROS_AVAILABLE == 1
+    private_node.param<string>("configfile", configfile, "gvins.yaml");
+#else
     node->declare_parameter<string>("configfile", "gvins.yaml");
     node->get_parameter("configfile", configfile);
+#endif
 
     // Load configurations
     YAML::Node config;
@@ -89,12 +97,18 @@ void FusionROS::run() {
             image_topic = config["ros"]["image_topic"].as<string>();
         }
     }
+#if ROS_AVAILABLE == 1
+    private_node.param<string>("imu_topic", imu_topic, imu_topic);
+    private_node.param<string>("gnss_topic", gnss_topic, gnss_topic);
+    private_node.param<string>("image_topic", image_topic, image_topic);
+#else
     node->declare_parameter<string>("imu_topic", imu_topic);
     node->declare_parameter<string>("gnss_topic", gnss_topic);
     node->declare_parameter<string>("image_topic", image_topic);
     node->get_parameter("imu_topic", imu_topic);
     node->get_parameter("gnss_topic", gnss_topic);
     node->get_parameter("image_topic", image_topic);
+#endif
 
     // Create the output directory
     boost::system::error_code filesystem_error;
@@ -152,6 +166,17 @@ void FusionROS::run() {
     }
 
     // subscribe message
+#if ROS_AVAILABLE == 1
+    auto imu_sub = node.subscribe<sensor_msgs::Imu>(imu_topic, 200, &FusionROS::imuCallback, this);
+    auto gnss_sub = node.subscribe<sensor_msgs::NavSatFix>(gnss_topic, 1, &FusionROS::gnssCallback, this);
+    ros::Subscriber image_sub;
+    if (use_compressed_image_) {
+        image_sub = node.subscribe<sensor_msgs::CompressedImage>(
+            image_topic, 20, &FusionROS::compressedImageCallback, this);
+    } else {
+        image_sub = node.subscribe<sensor_msgs::Image>(image_topic, 20, &FusionROS::imageCallback, this);
+    }
+#else
     auto imu_qos = rclcpp::SensorDataQoS();
     imu_qos.keep_last(200);
     auto gnss_qos = rclcpp::SensorDataQoS();
@@ -172,18 +197,23 @@ void FusionROS::run() {
         image_sub = node->create_subscription<sensor_msgs::msg::Image>(
             image_topic, image_qos, std::bind(&FusionROS::imageCallback, this, std::placeholders::_1));
     }
+#endif
 
     LOGI << "Waiting ROS message...";
 
     // enter message loopback
+#if ROS_AVAILABLE == 1
+    ros::spin();
+#else
     rclcpp::spin(node);
+#endif
 }
 
-void FusionROS::imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr imumsg) {
+void FusionROS::imuCallback(const gvins_ros::ImuConstPtr &imumsg) {
     imu_pre_ = imu_;
 
     // Time convertion
-    double unixsecond = rclcpp::Time(imumsg->header.stamp).seconds();
+    double unixsecond = gvins_ros::stampToSeconds(imumsg->header.stamp);
     double weeksec;
     int week;
     GpsTime::unix2gps(unixsecond, week, weeksec);
@@ -220,9 +250,9 @@ void FusionROS::imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr imumsg) 
     }
 }
 
-void FusionROS::gnssCallback(const sensor_msgs::msg::NavSatFix::ConstSharedPtr gnssmsg) {
+void FusionROS::gnssCallback(const gvins_ros::NavSatFixConstPtr &gnssmsg) {
     // Time convertion
-    double unixsecond = rclcpp::Time(gnssmsg->header.stamp).seconds();
+    double unixsecond = gvins_ros::stampToSeconds(gnssmsg->header.stamp);
     double weeksec;
     int week;
     GpsTime::unix2gps(unixsecond, week, weeksec);
@@ -287,7 +317,7 @@ bool addImageFrameToGvins(std::shared_ptr<GVINS> &gvins, std::queue<Frame::Ptr> 
 
 } // namespace
 
-void FusionROS::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imagemsg) {
+void FusionROS::imageCallback(const gvins_ros::ImageConstPtr &imagemsg) {
     Mat image;
 
     // Copy image data
@@ -306,7 +336,7 @@ void FusionROS::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imag
         return;
     }
 
-    double unixsecond = rclcpp::Time(imagemsg->header.stamp).seconds();
+    double unixsecond = gvins_ros::stampToSeconds(imagemsg->header.stamp);
     if (!addImageFrameToGvins(gvins_, frame_buffer_, frame_, image, unixsecond)) {
         return;
     }
@@ -315,11 +345,11 @@ void FusionROS::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imag
                           << Logging::doubleData(gnss_.time) << ", " << Logging::doubleData(frame_->stamp());
 }
 
-void FusionROS::compressedImageCallback(const sensor_msgs::msg::CompressedImage::ConstSharedPtr imagemsg) {
+void FusionROS::compressedImageCallback(const gvins_ros::CompressedImageConstPtr &imagemsg) {
     Mat encoded(1, static_cast<int>(imagemsg->data.size()), CV_8UC1, const_cast<uint8_t *>(imagemsg->data.data()));
     Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
 
-    double unixsecond = rclcpp::Time(imagemsg->header.stamp).seconds();
+    double unixsecond = gvins_ros::stampToSeconds(imagemsg->header.stamp);
     if (!addImageFrameToGvins(gvins_, frame_buffer_, frame_, image, unixsecond)) {
         return;
     }
@@ -347,9 +377,13 @@ void checkStateThread(std::shared_ptr<FusionROS> fusion) {
     std::cout << "GVINS has been shutdown ..." << std::endl;
 
     // Shutdown ROS
+#if ROS_AVAILABLE == 1
+    ros::shutdown();
+#else
     if (rclcpp::ok()) {
         rclcpp::shutdown();
     }
+#endif
 
     std::cout << "ROS node has been shutdown ..." << std::endl;
 }
@@ -359,10 +393,15 @@ int main(int argc, char *argv[]) {
     Logging::initialization(argv, true, true);
 
     // ROS node
+#if ROS_AVAILABLE == 1
+    ros::init(argc, argv, "gvins_node", ros::init_options::NoSigintHandler);
+#else
     rclcpp::init(argc, argv);
+#endif
 
     // Register signal handler
     std::signal(SIGINT, sigintHandler);
+    std::signal(SIGTERM, sigintHandler);
 
     auto fusion = std::make_shared<FusionROS>();
 

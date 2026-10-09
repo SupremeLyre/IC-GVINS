@@ -24,18 +24,12 @@
 #define DRAWER_RVIZ_H
 
 #include "tracking/drawer.h"
+#include "ros_compat.h"
 
 #include <atomic>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
-
-#include <rclcpp/rclcpp.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <nav_msgs/msg/path.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/point_cloud.hpp>
-#include <tf2_ros/transform_broadcaster.h>
 
 using std::string;
 using std::vector;
@@ -43,7 +37,11 @@ using std::vector;
 class DrawerRviz : public Drawer {
 
 public:
+#if ROS_AVAILABLE == 1
+    explicit DrawerRviz(ros::NodeHandle &node);
+#else
     explicit DrawerRviz(const rclcpp::Node::SharedPtr &node);
+#endif
 
     void run() override;
 
@@ -67,6 +65,8 @@ private:
 
     void publishOdometry();
 
+    gvins_ros::Time now() const;
+
 private:
     // 多线程
     std::condition_variable update_sem_;
@@ -84,16 +84,26 @@ private:
     vector<Vector3d> fixed_mappoints_;
 
     Pose pose_;
+#if ROS_AVAILABLE == 2
     rclcpp::Node::SharedPtr node_;
+#endif
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
-    nav_msgs::msg::Path path_;
+    gvins_ros::nav::Path path_;
 
+#if ROS_AVAILABLE == 1
+    ros::Publisher path_pub_;
+    ros::Publisher pose_pub_;
+    ros::Publisher track_image_pub_;
+    ros::Publisher fixed_points_pub_;
+    ros::Publisher current_points_pub_;
+#else
     rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pose_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr track_image_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr fixed_points_pub_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr current_points_pub_;
+#endif
 
     string frame_id_;
     string body_frame_id_;

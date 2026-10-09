@@ -25,13 +25,7 @@
 
 #include "ic_gvins/common/types.h"
 #include "ic_gvins/ic_gvins.h"
-
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/image_encodings.hpp>
-#include <sensor_msgs/msg/compressed_image.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/imu.hpp>
-#include <sensor_msgs/msg/nav_sat_fix.hpp>
+#include "ros_compat.h"
 
 #include <memory>
 #include <string>
@@ -46,13 +40,13 @@ public:
     void setFinished();
 
 private:
-    void imuCallback(const sensor_msgs::msg::Imu::ConstSharedPtr imumsg);
+    void imuCallback(const gvins_ros::ImuConstPtr &imumsg);
 
-    void gnssCallback(const sensor_msgs::msg::NavSatFix::ConstSharedPtr gnssmsg);
+    void gnssCallback(const gvins_ros::NavSatFixConstPtr &gnssmsg);
 
-    void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr imagemsg);
+    void imageCallback(const gvins_ros::ImageConstPtr &imagemsg);
 
-    void compressedImageCallback(const sensor_msgs::msg::CompressedImage::ConstSharedPtr imagemsg);
+    void compressedImageCallback(const gvins_ros::CompressedImageConstPtr &imagemsg);
 
 private:
     std::shared_ptr<GVINS> gvins_;

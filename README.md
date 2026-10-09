@@ -27,23 +27,27 @@ Click the following image to open our video on [Bilibili](https://www.bilibili.c
 
 ### 1.1 System and compiler
 
-We recommend you use Ubuntu 18.04 or Ubuntu 20.04 with the newest compiler (**gcc>=8.0 or clang>=6.0**). 
+Use the compiler supplied with the Ubuntu release for your ROS distribution. The core requires C++17; ROS targets can propagate a newer standard when required by the distribution.
 
-```shell
-# gcc-8
-sudo apt install gcc-8 g++-8
+### 1.2 Robot Operating System (ROS 1 / ROS 2)
 
-# Clang
-# sudo apt install clang
-```
+The same source tree supports the following environments:
 
-### 1.2 Robot Operating System (ROS 2)
+| ROS distribution | Ubuntu | Build system | Visualization |
+| --- | --- | --- | --- |
+| ROS 1 Noetic | 20.04 | catkin | RViz |
+| ROS 2 Jazzy | 24.04 | ament / colcon | RViz2 |
+| ROS 2 Lyrical | 26.04 | ament / colcon | RViz2 |
 
-Install a ROS 2 distribution with `rclcpp`, `sensor_msgs`, `nav_msgs`, `geometry_msgs`, `tf2_ros`, and `rviz2` available.
+Install `sensor_msgs`, `nav_msgs`, `geometry_msgs`, and `tf2_ros`, together with `roscpp` for ROS 1 or `rclcpp` for ROS 2. Source the desired ROS environment before building.
+
+Following [OpenVINS](https://github.com/rpng/open_vins/blob/master/ov_msckf/CMakeLists.txt), the build selects `cmake/ROS1.cmake` or `cmake/ROS2.cmake`. `package.xml` uses `$ROS_VERSION` conditions to select the matching dependencies and build type. ROS 2 dependencies are linked through exported CMake targets, including on Lyrical where `ament_target_dependencies()` is unavailable.
 
 ### 1.3 Ceres Solver with its Dependencies
 
 We use Ceres Solver to solve the non-linear least squares problem in IC-GVINS. The supported version is **Ceres Solver 2.0.0 or 2.1.0**. Please follow [Ceres installation instructions](http://ceres-solver.org/installation.html).
+
+On Ubuntu 20.04, the system `libceres-dev` provides Ceres 1.14, so build Ceres 2.0/2.1 from source. If multiple installations are present, pass `-DCeres_DIR=/path/to/ceres/install/lib/cmake/Ceres` to catkin_make or colcon's `--cmake-args`. The solver currently uses `LocalParameterization`, which requires Ceres earlier than 2.2.
 
 The dependencies **Eigen (>=3.3.7)**, **TBB**, **glog (>=0.4.0)** are also used in IC-GVINS. You can install them as follows:
 
@@ -72,41 +76,50 @@ sudo apt install libyaml-cpp-dev
 ### 2.1 Build the source code
 
 ```shell
-# Make workspace directory
-mkdir ~/gvins_ws && cd ~/gvins_ws
-mkdir src && cd src
+# Place this checkout (including the dual-ROS changes) under ~/gvins_ws/src/IC-GVINS
+cd ~/gvins_ws
 
-# Clone the repository into src directory
-git clone https://github.com/i2Nav-WHU/IC-GVINS.git
+# ROS 1 Noetic
+source /opt/ros/noetic/setup.bash
+catkin_make -j2 -DCMAKE_BUILD_TYPE=Release
+```
 
-# To gvins_ws directory
-cd ..
+For ROS 2, use a separate workspace and build with colcon:
 
-# Build the source code using colcon
-source /opt/ros/<ros2-distro>/setup.bash
+```shell
+cd ~/gvins_ros2_ws
+source /opt/ros/jazzy/setup.bash
+# For Lyrical, source /opt/ros/lyrical/setup.bash instead
 colcon build --packages-select ic_gvins --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
+
+Keep separate build and install directories for each ROS distribution. CMake defaults to the sourced environment's `ROS_VERSION`; `-DROS_VERSION=1` or `-DROS_VERSION=2` can select the CMake branch explicitly, but the matching ROS environment must still be sourced for package discovery. Use `--cmake-clean-cache` when reconfiguring an existing colcon build. For zsh, replace `setup.bash` with `setup.zsh`.
 
 ### 2.2 Run demo dataset
 
 If you have already downloaded the open-sourced dataset, run the following commands.
 
 ```shell
-# Open a terminal and source the workspace environment
-# For bash
-source ~/gvins_ws/install/setup.bash
-# For zsh
-# source ~/gvins_ws/install/setup.zsh
+# ROS 1 Noetic
+source ~/gvins_ws/devel/setup.bash
+roslaunch ic_gvins ic_gvins.launch configfile:=/path/urban38/IC-GVINS/gvins.yaml use_sim_time:=true
 
-# Run IC-GVINS node
-# You should change the path in both the configuration file and command line
-ros2 launch ic_gvins ic_gvins.launch.py configfile:=path/urban38/IC-GVINS/gvins.yaml
-
-# Open another terminal to play a ROS 2 bag
-ros2 bag play path/urban38/urban38_ros2_bag
+# Open another terminal to play the original ROS 1 bag
+rosbag play --clock /path/urban38/urban38.bag
 ```
 
-The original public datasets are ROS 1 `.bag` files, so convert them to ROS 2 bags or bridge the topics before playing them in a ROS 2-only environment.
+```shell
+# ROS 2 Jazzy / Lyrical
+source ~/gvins_ros2_ws/install/setup.bash
+ros2 launch ic_gvins ic_gvins.launch.py configfile:=/path/urban38/IC-GVINS/gvins.yaml use_sim_time:=true
+
+# Open another terminal to play a ROS 2 bag
+ros2 bag play /path/urban38/urban38_ros2_bag --clock
+```
+
+The original public datasets are ROS 1 `.bag` files, so convert them to ROS 2 bags or bridge the topics before playing them in ROS 2. Both launch interfaces accept `rviz:=false` for running without visualization. ROS 2 also provides `ic_gvins.launch.xml`; `ic_gvins.launch` is the ROS 1 file.
+
+Topics default to `/imu0`, `/gnss0`, and `/cam0`. Set `ros.imu_topic`, `ros.gnss_topic`, and `ros.image_topic` in the configuration YAML; node parameters with the same names override these values. Both ROS versions support `ros.use_compressed_image: true` with a `sensor_msgs/CompressedImage` topic and the existing `imu_orientation` setting. The `ic_gvins/config` symlink exposes the shared configuration directory to ROS 1 in a source/devel workspace; both build systems install the configuration files into the package's share directory.
 
 ## 3 Datasets
 
@@ -116,9 +129,9 @@ We use standard ROS bag for IC-GVINS. The employed messages are as follows:
 
 | Sensor   | Message                                                                                 | Default Topic | KAIST Dataset (Hz) | IC-GVINS Dataset (Hz) |
 | ---------- | ----------------------------------------------------------------------------------------- | --------------- | -------------------- | ----------------------- |
-| Camera   | sensor_msgs/msg/Image     | /cam0         | 10                 | 20                    |
-| IMU      | sensor_msgs/msg/Imu       | /imu0         | 100                | 200                   |
-| GNSS-RTK | sensor_msgs/msg/NavSatFix | /gnss0        | 1                  | 1                     |
+| Camera   | sensor_msgs/Image (ROS 1), sensor_msgs/msg/Image (ROS 2) | /cam0 | 10 | 20 |
+| IMU      | sensor_msgs/Imu (ROS 1), sensor_msgs/msg/Imu (ROS 2) | /imu0 | 100 | 200 |
+| GNSS-RTK | sensor_msgs/NavSatFix (ROS 1), sensor_msgs/msg/NavSatFix (ROS 2) | /gnss0 | 1 | 1 |
 
 The IMU should be in **front-right-down** format in the IC-GVINS.
 
@@ -154,7 +167,7 @@ You can run IC-GVINS with your self-collected dataset. Keep in mind the followin
 
 1. You should prepare well-synchronized GNSS, Camera, and IMU data in a ROS bag;
 2. The IMU data should be in front-right-down format;
-3. Modify the topic names in the `ic_gvins.launch.py` file;
+3. Set the topic names in the configuration file's `ros` section;
 4. Modify the parameters in the configuration file.
 
 ### 3.5 Evaluation

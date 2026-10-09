@@ -1,13 +1,16 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     package_share = FindPackageShare("ic_gvins")
     configfile = LaunchConfiguration("configfile")
+    use_sim_time = ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)
     rviz_config = PathJoinSubstitution([package_share, "config", "visualization.rviz"])
 
     return LaunchDescription(
@@ -16,6 +19,8 @@ def generate_launch_description():
                 "configfile",
                 default_value=PathJoinSubstitution([package_share, "config", "gvins.yaml"]),
             ),
+            DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument("rviz", default_value="true"),
             Node(
                 package="ic_gvins",
                 executable="ic_gvins_ros",
@@ -24,6 +29,7 @@ def generate_launch_description():
                 parameters=[
                     {
                         "configfile": configfile,
+                        "use_sim_time": use_sim_time,
                     }
                 ],
             ),
@@ -57,6 +63,8 @@ def generate_launch_description():
                 executable="rviz2",
                 name="visualisation",
                 output="log",
+                condition=IfCondition(LaunchConfiguration("rviz")),
+                parameters=[{"use_sim_time": use_sim_time}],
                 arguments=["-d", rviz_config],
             ),
         ]

@@ -1,16 +1,15 @@
 <launch>
-    <arg name="configfile" default="$(find-pkg-share ic_gvins)/config/gvins.yaml"/>
+    <arg name="configfile" default="$(find ic_gvins)/config/gvins.yaml"/>
+    <arg name="use_sim_time" default="false"/>
+    <arg name="rviz" default="true"/>
+    <param name="use_sim_time" value="$(arg use_sim_time)"/>
 
-    <node name="ic_gvins_node" pkg="ic_gvins" exec="ic_gvins_ros" output="screen">
-        <param name="imu_topic" value="/imu0"/>
-        <param name="gnss_topic" value="/gnss0"/>
-        <param name="image_topic" value="/cam0"/>
-
-        <param name="configfile" value="$(var configfile)"/>
+    <node name="ic_gvins_node" pkg="ic_gvins" type="ic_gvins_ros" output="screen">
+        <param name="configfile" value="$(arg configfile)"/>
     </node>
 
-    <node pkg="tf2_ros" exec="static_transform_publisher" name="world_to_map_broadcaster"
-          args="--x 0 --y 0 --z 0 --qx -1 --qy 0 --qz 0 --qw 0 --frame-id map --child-frame-id world"/>
-    <node name="visualisation" pkg="rviz2" exec="rviz2" output="log"
-          args="-d $(find-pkg-share ic_gvins)/config/visualization.rviz"/>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_map_broadcaster"
+          args="0 0 0 -1 0 0 0 map world"/>
+    <node if="$(arg rviz)" name="visualisation" pkg="rviz" type="rviz" output="log"
+          args="-d $(find ic_gvins)/config/visualization_ros1.rviz"/>
 </launch>

@@ -1,9 +1,26 @@
 cmake_minimum_required(VERSION 3.10)
 project(ic_gvins)
 
+set(ROS_VERSION "$ENV{ROS_VERSION}" CACHE STRING "ROS major version (1 or 2)")
+set_property(CACHE ROS_VERSION PROPERTY STRINGS 1 2)
+if(NOT ROS_VERSION)
+    find_package(catkin QUIET COMPONENTS roscpp)
+    if(catkin_FOUND)
+        set(ROS_VERSION 1 CACHE STRING "ROS major version (1 or 2)" FORCE)
+    else()
+        find_package(ament_cmake REQUIRED)
+        set(ROS_VERSION 2 CACHE STRING "ROS major version (1 or 2)" FORCE)
+    endif()
+endif()
+if(NOT ROS_VERSION MATCHES "^[12]$")
+    message(FATAL_ERROR "ROS_VERSION must be 1 or 2; source the desired ROS setup file before building")
+endif()
+message(STATUS "Building IC-GVINS for ROS ${ROS_VERSION}")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 # Optimization
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -O3")
@@ -21,6 +38,7 @@ file(GLOB_RECURSE GVINS_SOURCE
         ic_gvins/preintegration/*.cc)
 add_library(ic_gvins_core SHARED
         ${GVINS_SOURCE})
+set_target_properties(ic_gvins_core PROPERTIES INSTALL_RPATH "$ORIGIN")
 
 # OpenCV
 find_package(OpenCV REQUIRED)
@@ -40,7 +58,7 @@ find_package(yaml-cpp REQUIRED)
 target_link_libraries(ic_gvins_core ${YAML_CPP_LIBRARIES})
 
 # Ceres
-find_package(Ceres REQUIRED)
+find_package(Ceres 2.0 REQUIRED)
 target_link_libraries(ic_gvins_core ${CERES_LIBRARIES})
 
 # boost
@@ -55,45 +73,16 @@ target_link_libraries(ic_gvins_core
 
 # abseil
 set(ABSL_PROPAGATE_CXX_STD true)
-add_subdirectory(thirdparty/abseil-cpp abseil-cpp)
+# Keep the bundled libraries static even when ament sets BUILD_SHARED_LIBS.
+function(add_gvins_abseil)
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory(thirdparty/abseil-cpp abseil-cpp)
+endfunction()
+add_gvins_abseil()
 target_link_libraries(ic_gvins_core
         absl::strings
         absl::str_format
         absl::time)
 
-# ROS interface
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(tf2_ros REQUIRED)
-
-# GVINS ROS with standard messages
-add_executable(${PROJECT_NAME}_ros
-        ROS/fusion_ros.cc
-        ROS/drawer_rviz.cc)
-
-ament_target_dependencies(${PROJECT_NAME}_ros
-        rclcpp
-        sensor_msgs
-        nav_msgs
-        geometry_msgs
-        tf2_ros)
-target_link_libraries(${PROJECT_NAME}_ros
-        ic_gvins_core)
-
-install(TARGETS
-        ic_gvins_core
-        ${PROJECT_NAME}_ros
-        ARCHIVE DESTINATION lib
-        LIBRARY DESTINATION lib
-        RUNTIME DESTINATION lib/${PROJECT_NAME})
-
-install(DIRECTORY launch
-        DESTINATION share/${PROJECT_NAME})
-
-install(DIRECTORY ../config
-        DESTINATION share/${PROJECT_NAME})
-
-ament_package()
+# Separate ROS build systems, following the OpenVINS layout.
+include(cmake/ROS${ROS_VERSION}.cmake)

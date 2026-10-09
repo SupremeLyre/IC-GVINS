@@ -25,22 +25,29 @@
 #include "common/logging.h"
 #include "common/rotation.h"
 
-#include <geometry_msgs/msg/point32.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <geometry_msgs/msg/transform_stamped.hpp>
-#include <nav_msgs/msg/odometry.hpp>
-#include <sensor_msgs/image_encodings.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/point_cloud.hpp>
-
+#if ROS_AVAILABLE == 1
+DrawerRviz::DrawerRviz(ros::NodeHandle &node)
+#else
 DrawerRviz::DrawerRviz(const rclcpp::Node::SharedPtr &node)
+#endif
     : isfinished_(false)
     , isframerdy_(false)
     , ismaprdy_(false)
-    , node_(node) {
+#if ROS_AVAILABLE == 2
+    , node_(node)
+#endif
+{
 
     frame_id_ = "world";
     body_frame_id_ = "gvins_body";
+#if ROS_AVAILABLE == 1
+    tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>();
+    pose_pub_ = node.advertise<nav_msgs::Odometry>("pose", 2);
+    path_pub_ = node.advertise<nav_msgs::Path>("path", 2);
+    track_image_pub_ = node.advertise<sensor_msgs::Image>("tracking", 2);
+    fixed_points_pub_ = node.advertise<sensor_msgs::PointCloud>("fixed", 2);
+    current_points_pub_ = node.advertise<sensor_msgs::PointCloud>("current", 2);
+#else
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
 
     pose_pub_           = node_->create_publisher<nav_msgs::msg::Odometry>("pose", rclcpp::QoS(2));
@@ -48,6 +55,15 @@ DrawerRviz::DrawerRviz(const rclcpp::Node::SharedPtr &node)
     track_image_pub_    = node_->create_publisher<sensor_msgs::msg::Image>("tracking", rclcpp::QoS(2));
     fixed_points_pub_   = node_->create_publisher<sensor_msgs::msg::PointCloud>("fixed", rclcpp::QoS(2));
     current_points_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud>("current", rclcpp::QoS(2));
+#endif
+}
+
+gvins_ros::Time DrawerRviz::now() const {
+#if ROS_AVAILABLE == 1
+    return ros::Time::now();
+#else
+    return node_->now();
+#endif
 }
 
 void DrawerRviz::setFinished() {
@@ -113,9 +129,9 @@ void DrawerRviz::publishTrackingImage() {
     Mat drawed;
     drawTrackingImage(raw_image_, drawed);
 
-    sensor_msgs::msg::Image image;
+    gvins_ros::sensor::Image image;
 
-    image.header.stamp    = node_->now();
+    image.header.stamp    = now();
     image.header.frame_id = frame_id_;
     image.encoding        = sensor_msgs::image_encodings::BGR8;
     image.height          = drawed.rows;
@@ -126,16 +142,16 @@ void DrawerRviz::publishTrackingImage() {
     image.data.resize(size);
     memcpy(image.data.data(), drawed.data, size);
 
-    track_image_pub_->publish(image);
+    gvins_ros::publish(track_image_pub_, image);
 }
 
 void DrawerRviz::publishMapPoints() {
     std::unique_lock<std::mutex> lock(map_mutex_);
 
-    auto stamp = node_->now();
+    auto stamp = now();
 
     // 发布窗口内的路标点
-    sensor_msgs::msg::PointCloud current_pointcloud;
+    gvins_ros::sensor::PointCloud current_pointcloud;
 
     current_pointcloud.header.stamp    = stamp;
     current_pointcloud.header.frame_id = frame_id_;
@@ -143,7 +159,7 @@ void DrawerRviz::publishMapPoints() {
     // 获取当前点云
     for (const auto &local : map_->landmarks()) {
         if (local.second && !local.second->isOutlier()) {
-            geometry_msgs::msg::Point32 point;
+            gvins_ros::geometry::Point32 point;
             point.x = static_cast<float>(local.second->pos().x());
             point.y = static_cast<float>(local.second->pos().y());
             point.z = static_cast<float>(local.second->pos().z());
@@ -151,23 +167,23 @@ void DrawerRviz::publishMapPoints() {
             current_pointcloud.points.push_back(point);
         }
     }
-    current_points_pub_->publish(current_pointcloud);
+    gvins_ros::publish(current_points_pub_, current_pointcloud);
 
     // 发布新的地图点
-    sensor_msgs::msg::PointCloud fixed_pointcloud;
+    gvins_ros::sensor::PointCloud fixed_pointcloud;
 
     fixed_pointcloud.header.stamp    = stamp;
     fixed_pointcloud.header.frame_id = frame_id_;
 
     for (const auto &pts : fixed_mappoints_) {
-        geometry_msgs::msg::Point32 point;
+        gvins_ros::geometry::Point32 point;
         point.x = static_cast<float>(pts.x());
         point.y = static_cast<float>(pts.y());
         point.z = static_cast<float>(pts.z());
 
         fixed_pointcloud.points.push_back(point);
     }
-    fixed_points_pub_->publish(fixed_pointcloud);
+    gvins_ros::publish(fixed_points_pub_, fixed_pointcloud);
 
     fixed_mappoints_.clear();
 }
@@ -175,10 +191,10 @@ void DrawerRviz::publishMapPoints() {
 void DrawerRviz::publishOdometry() {
     std::unique_lock<std::mutex> lock(map_mutex_);
 
-    nav_msgs::msg::Odometry odometry;
+    gvins_ros::nav::Odometry odometry;
 
     auto quaternion = Rotation::matrix2quaternion(pose_.R);
-    auto stamp      = node_->now();
+    auto stamp      = now();
 
     // Odometry
     odometry.header.stamp            = stamp;
@@ -191,9 +207,9 @@ void DrawerRviz::publishOdometry() {
     odometry.pose.pose.orientation.y = quaternion.y();
     odometry.pose.pose.orientation.z = quaternion.z();
     odometry.pose.pose.orientation.w = quaternion.w();
-    pose_pub_->publish(odometry);
+    gvins_ros::publish(pose_pub_, odometry);
 
-    geometry_msgs::msg::TransformStamped transform;
+    gvins_ros::geometry::TransformStamped transform;
     transform.header.stamp            = stamp;
     transform.header.frame_id         = frame_id_;
     transform.child_frame_id          = body_frame_id_;
@@ -204,7 +220,7 @@ void DrawerRviz::publishOdometry() {
     tf_broadcaster_->sendTransform(transform);
 
     // Path
-    geometry_msgs::msg::PoseStamped pose_stamped;
+    gvins_ros::geometry::PoseStamped pose_stamped;
     pose_stamped.header.stamp    = stamp;
     pose_stamped.header.frame_id = frame_id_;
     pose_stamped.pose            = odometry.pose.pose;
@@ -212,7 +228,7 @@ void DrawerRviz::publishOdometry() {
     path_.header.stamp    = stamp;
     path_.header.frame_id = frame_id_;
     path_.poses.push_back(pose_stamped);
-    path_pub_->publish(path_);
+    gvins_ros::publish(path_pub_, path_);
 }
 
 void DrawerRviz::addNewFixedMappoint(Vector3d point) {

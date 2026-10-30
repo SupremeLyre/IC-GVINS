@@ -44,6 +44,7 @@
 #include "preintegration/preintegration_factor.h"
 
 #include <ceres/ceres.h>
+#include <stdexcept>
 #include <yaml-cpp/yaml.h>
 
 GVINS::GVINS(const string &configfile, const string &outputpath, Drawer::Ptr drawer) {
@@ -82,7 +83,6 @@ GVINS::GVINS(const string &configfile, const string &outputpath, Drawer::Ptr dra
     initlength_       = config["initlength"].as<int>();
     imudatarate_      = config["imudatarate"].as<double>();
     imudatadt_        = 1.0 / imudatarate_;
-    reserved_ins_num_ = 2;
     if (config["imu"] && config["imu"]["is_use_zupt"]) {
         is_use_zupt_ = config["imu"]["is_use_zupt"].as<bool>();
     }
@@ -238,6 +238,11 @@ bool GVINS::addNewGnss(const GNSS &gnss) {
         integration_parameters_->gravity = Earth::gravity(gnss.blh);
         LOGI << "Local gravity is initialized as " << Logging::doubleData(integration_parameters_->gravity);
     } else {
+        // Initialization needs a one-second GNSS baseline for stationary IMU
+        // statistics and course alignment, even when GNSS arrives faster.
+        if (gvinsstate_ == GVINS_INITIALIZING && gnss.time - gnss_.time < 1.0 - 1.0e-6) {
+            return true;
+        }
         last_last_gnss_ = last_gnss_;
         last_gnss_      = gnss_;
     }
@@ -267,6 +272,7 @@ bool GVINS::addNewFrame(const Frame::Ptr &frame) {
 void GVINS::runFusion() {
     IMU imu_pre, imu_cur;
     IntegrationState state;
+    int gps_week = 0;
     Frame::Ptr frame;
 
     LOGI << "Fusion thread is started";
@@ -305,7 +311,7 @@ void GVINS::runFusion() {
                         isoptimized_ = false;
 
                         state = Preintegration::stateFromData(statedatalist_.back(), preintegration_options_);
-                        MISC::redoInsMechanization(integration_config_, state, reserved_ins_num_, ins_window_);
+                        MISC::redoInsMechanization(integration_config_, state, timelist_.front(), ins_window_);
 
                         state_mutex_.unlock();
                     } else {
@@ -326,16 +332,19 @@ void GVINS::runFusion() {
                 // Fusion process
                 if (gvinsstate_ == GVINS_INITIALIZING) {
                     if (isgnssready_ && state_mutex_.try_lock()) {
-                        // 初始化参数
-                        // GVINS initialization using GNSS/INS initialization
-                        if (gvinsInitialization()) {
-                            gvinsstate_ = GVINS_INITIALIZING_INS;
+                        // Wait until IMU data covers the complete GNSS interval.
+                        if (gnss_.time < ins_window_.back().first.time) {
+                            // 初始化参数
+                            // GVINS initialization using GNSS/INS initialization
+                            if (gvinsInitialization()) {
+                                gvinsstate_ = GVINS_INITIALIZING_INS;
 
-                            // 初始化时需要重新积分
-                            // Redo INS mechanization
-                            isoptimized_ = true;
+                                // 初始化时需要重新积分
+                                // Redo INS mechanization
+                                isoptimized_ = true;
+                            }
+                            isgnssready_ = false;
                         }
-                        isgnssready_ = false;
 
                         state_mutex_.unlock();
                         continue;
@@ -410,12 +419,13 @@ void GVINS::runFusion() {
                 // 用于输出
                 // For output only
                 state = ins_window_.back().second;
+                gps_week = ins_window_.back().first.gps_week;
             } // INS
 
             // 总是输出最新的INS机械编排结果, 不占用INS锁
             // Always output the INS results
             if (gvinsstate_ > GVINS_INITIALIZING) {
-                MISC::writeNavResult(integration_config_, state, navfilesaver_, imuerrfilesaver_, trajfilesaver_);
+                MISC::writeNavResult(integration_config_, state, gps_week, navfilesaver_, imuerrfilesaver_, trajfilesaver_);
             }
 
         } // IMU BUFFER
@@ -710,7 +720,7 @@ bool GVINS::gvinsInitialization() {
     // 计算第一秒的INS结果
     // Redo INS mechanization at the first second
     state = Preintegration::stateFromData(statedatalist_.back(), preintegration_options_);
-    MISC::redoInsMechanization(integration_config_, state, reserved_ins_num_, ins_window_);
+    MISC::redoInsMechanization(integration_config_, state, timelist_.front(), ins_window_);
 
     LOGI << "Initialization at " << Logging::doubleData(gnss_.time);
 
@@ -933,7 +943,10 @@ void GVINS::addNewTimeNode(double time) {
     // Obtain the IMU samples between the two time nodes
     double start = timelist_.back();
     double end   = time;
-    MISC::getImuSeriesFromTo(ins_window_, start, end, series);
+    if (!MISC::getImuSeriesFromTo(ins_window_, start, end, series)) {
+        throw std::runtime_error("Cannot create time node: IMU data does not cover " + Logging::doubleData(start) +
+                                 " to " + Logging::doubleData(end));
+    }
 
     state = Preintegration::stateFromData(statedatalist_.back(), preintegration_options_);
 
@@ -1535,12 +1548,12 @@ bool GVINS::gvinsMarginalization() {
             }
         }
 
-        if (optimize_estimate_td_) {
-            for (size_t k = 0; k < last_marginalization_parameter_blocks_.size(); k++) {
-                if (last_marginalization_parameter_blocks_[k] == &map_->keyframes().at(keyframeids[0])->timeDelayEst()) {
-                    marginalized_index.push_back((int) k);
-                    break;
-                }
+        // Reprojection priors contain time-delay blocks even when their values are fixed.
+        // Always remove the oldest frame's block before the frame is destroyed.
+        for (size_t k = 0; k < last_marginalization_parameter_blocks_.size(); k++) {
+            if (last_marginalization_parameter_blocks_[k] == &map_->keyframes().at(keyframeids[0])->timeDelayEst()) {
+                marginalized_index.push_back((int) k);
+                break;
             }
         }
 

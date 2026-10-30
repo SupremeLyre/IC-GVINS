@@ -218,7 +218,8 @@ void FusionROS::imuCallback(const gvins_ros::ImuConstPtr &imumsg) {
     int week;
     GpsTime::unix2gps(unixsecond, week, weeksec);
 
-    imu_.time = weeksec;
+    imu_.time     = weeksec;
+    imu_.gps_week = week;
     // delta time
     imu_.dt = imu_.time - imu_pre_.time;
 

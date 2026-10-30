@@ -1,0 +1,94 @@
+# IC-GVINS configuration migrated from LE-VINS le_vins_gopro_20260525.yaml
+
+# Output directory
+outputpath: /media/supremelyre/nvme1/datasets/20261025/IC-GVINS/
+is_make_outputdir: true
+
+# ROS interface configuration
+ros:
+    imu_topic: "/imu"
+    # LE-VINS did not use GNSS in this config; keep this as the GNSS topic used by IC-GVINS.
+    gnss_topic: "/gnss/pos"
+    image_topic: "/cam0/image_compressed"
+    use_compressed_image: true
+    # These bag fields are kept for traceability; IC-GVINS ROS currently subscribes live topics.
+    is_read_bag: true
+    bag_file: "/media/supremelyre/nvme2/datasets/20261025/20261025T025548Z_b1120f9b"
+
+# Time length for GNSS/INS initialization, s
+initlength: 1
+
+# IMU sample rate, Hz
+imudatarate: 50
+
+# IMU raw frame orientation, converted internally to FRD
+imu_orientation: "FRD"
+
+# Additional IMU options migrated from LE-VINS imu.*
+imu:
+    is_use_zupt: true
+
+# Consider the Earth rotation
+iswithearth: true
+
+# GNSS lever-arm in IMU body frame (front-right-down), m
+antlever: [-0.009072, -0.37110, -0.0274]
+
+# IMU noise parameters migrated from le_vins_gopro_20260525.yaml: imu.*
+imumodel:
+    arw: 0.025        # deg/sqrt(hr)
+    vrw: 0.03       # m/s/sqrt(hr)
+    gbstd: 0.5     # deg/hr
+    abstd: 200.0   # mGal
+    corrtime: 0.0277   # hr
+
+# GNSS outage configurations
+isusegnssoutage: false
+gnssoutagetime: 0
+
+# A fixed threshold (STD, m) for GNSS outlier culling
+gnssthreshold: 20
+
+# Use visualization
+is_use_visualization: true
+
+# Tracking configurations migrated from visual.*
+track_check_histogram: false
+track_min_parallax: 25
+track_max_interval: 0.5
+track_max_features: 200
+
+# Optimization configurations migrated from optimizer.*
+reprojection_error_std: 1.5
+optimize_windows_size: 10
+optimize_num_iterations: 20
+optimize_estimate_extrinsic: true
+optimize_estimate_td: true
+# Same semantics as LE-VINS: true applies a tighter camera-IMU extrinsic prior.
+optimize_cam_extrinsic_accurate: true
+
+# Camera parameters migrated from visual.*
+cam0:
+    camera_model: pinhole
+    mask_file: ""
+
+    # Intrinsic parameters [fx, fy, cx, cy(, skew)]
+    intrinsic: [473.77596363730873, 472.6158685721644, 319.9847966905488, 178.64849136684995]
+
+    # Distortion parameters [k1, k2, p1, p2(, k3)]
+    distortion: [0.08686316330320282, -0.14367666981661625, -0.002299420233450005, 0.00010061965068628928]
+
+    # Resolution
+    resolution: [640, 360]
+
+    # Camera-IMU extrinsic: Pb = q_b_c * Pc + t_b_c
+    # Inverse of T_cam_imu from 20261022T153009Z-camchain-imucam.yaml.
+    # This calibration is in the raw IMU frame and will be converted to FRD.
+    extrinsic_in_raw_imu_frame: true
+
+    # q (x, y, z, w)
+    q_b_c: [0.43196192115762655, 0.42586361777014736, 0.5620242581848782, 0.5622969063948972]
+    t_b_c: [0.03589, -0.08806, 0.0]
+
+    # t_i = t_c + td
+    td_b_c: 0.02007138742050048

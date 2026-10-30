@@ -55,6 +55,8 @@ typedef struct IMU {
     Vector3d dvel;
 
     double odovel;
+
+    int gps_week{0}; // Full GPS week paired with time (seconds of week), for navigation output.
 } IMU;
 
 typedef struct Pose {

@@ -229,7 +229,6 @@ private:
 
     double imudatarate_{200};
     double imudatadt_{0.005};
-    size_t reserved_ins_num_;
     bool is_use_zupt_{false};
 
     Vector3d antlever_;

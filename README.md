@@ -172,6 +172,12 @@ You can run IC-GVINS with your self-collected dataset. Keep in mind the followin
 
 ### 3.5 Evaluation
 
+The `gvins.nav` file contains 11 columns: full GPS week, GPS seconds of week,
+latitude (deg), longitude (deg), ellipsoidal height (m), north/east/down velocity
+(m/s), and roll/pitch/heading (deg). The GPS week is retained from the ROS IMU
+timestamp and written with the corresponding INS epoch; it is not truncated to
+10 bits. The output cadence remains one row per 10 INS updates.
+
 We use [evo](https://github.com/MichaelGrupp/evo) to evaluate the TUM trajectory files. We also provide some useful scripts ([evaluate_odometry](https://github.com/i2Nav-WHU/evaluate_odometry)) for evaluation.
 
 ## 4 Acknowledgements

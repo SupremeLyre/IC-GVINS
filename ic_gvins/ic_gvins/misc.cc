@@ -27,6 +27,8 @@
 #include "common/logging.h"
 #include "common/rotation.h"
 
+#include <algorithm>
+
 size_t MISC::getInsWindowIndex(const std::deque<std::pair<IMU, IntegrationState>> &window, double time) {
     // 返回时间大于输入的第一个索引
 
@@ -206,7 +208,7 @@ void MISC::insMechanization(const IntegrationConfiguration &config, const IMU &i
 }
 
 void MISC::redoInsMechanization(const IntegrationConfiguration &config, const IntegrationState &updated_state,
-                                size_t reserved_ins_num, std::deque<std::pair<IMU, IntegrationState>> &ins_windows) {
+                                double oldest_required_time, std::deque<std::pair<IMU, IntegrationState>> &ins_windows) {
     // 最新的优化过的位姿
     auto state   = updated_state;
     size_t index = getInsWindowIndex(ins_windows, state.time);
@@ -250,12 +252,9 @@ void MISC::redoInsMechanization(const IntegrationConfiguration &config, const In
         ins_windows[k].second = state;
     }
 
-    // 移除过期的IMU历元
-    if (index < reserved_ins_num) {
-        return;
-    }
-    size_t counts = index - reserved_ins_num;
-    for (size_t k = 0; k < counts; k++) {
+    // Keep the sliding window's IMU history for delayed GNSS insertion.
+    // Retain the sample before the oldest state for interpolation.
+    while (ins_windows.size() > 2 && ins_windows[1].first.time < oldest_required_time) {
         ins_windows.pop_front();
     }
 }
@@ -296,66 +295,61 @@ void MISC::imuInterpolation(const IMU &imu01, IMU &imu00, IMU &imu11, double mid
     imu00.dtheta = buff.dtheta * (1 - scale);
     imu00.dvel   = buff.dvel * (1 - scale);
     imu00.odovel = buff.odovel * (1 - scale);
+    imu00.gps_week = buff.gps_week;
 
     imu11.time   = buff.time;
     imu11.dt     = buff.time - time;
     imu11.dtheta = buff.dtheta * scale;
     imu11.dvel   = buff.dvel * scale;
     imu11.odovel = buff.odovel * scale;
+    imu11.gps_week = buff.gps_week;
 }
 
 bool MISC::getImuSeriesFromTo(const std::deque<std::pair<IMU, IntegrationState>> &ins_windows, double start, double end,
                               vector<IMU> &series) {
+    series.clear();
+
     // 获得起点和终点附近的索引
     size_t is = getInsWindowIndex(ins_windows, start);
     size_t ie = getInsWindowIndex(ins_windows, end);
+    if (!ins_windows.empty() && end == ins_windows.back().first.time) {
+        ie = ins_windows.size() - 1;
+    }
 
-    if ((is == 0) && (ie == 0)) {
-        LOGE << "Failed to get right IMU series " << Logging::doubleData(start) << " to " << Logging::doubleData(end);
+    if (is == 0 || ie == 0 || end <= start) {
+        LOGE << "Failed to get right IMU series " << Logging::doubleData(start) << " to " << Logging::doubleData(end)
+             << ", available " << ins_windows.size() << " samples from "
+             << (ins_windows.empty() ? "empty" : Logging::doubleData(ins_windows.front().first.time)) << " to "
+             << (ins_windows.empty() ? "empty" : Logging::doubleData(ins_windows.back().first.time));
         return false;
     }
 
-    IMU imu0, imu1, imu;
-    series.clear();
-
-    // 内插起点
-    imu0 = ins_windows[is - 1].first;
-    imu1 = ins_windows[is].first;
-
-    int isneed = isNeedInterpolation(imu0, imu1, start);
-    if (isneed == -1) {
-        series.push_back(imu0);
-        series.push_back(imu1);
-    } else if (isneed == 1) {
-        series.push_back(imu1);
-    } else if (isneed == 2) {
-        imuInterpolation(imu1, imu, imu1, start);
-        series.push_back(imu);
-        series.push_back(imu1);
+    // The first sample seeds preintegration; its increment is not integrated.
+    IMU seed = ins_windows[is - 1].first;
+    if (start > seed.time) {
+        IMU remainder;
+        imuInterpolation(ins_windows[is].first, seed, remainder, start);
     }
+    seed.time = start;
+    series.push_back(seed);
 
-    // 中间部分
-    for (size_t k = is + 1; k < ie - 1; k++) {
-        series.push_back(ins_windows[k].first);
-    }
-
-    // 内插终点
-    imu0 = ins_windows[ie - 1].first;
-    imu1 = ins_windows[ie].first;
-
-    isneed = isNeedInterpolation(imu0, imu1, end);
-    if (isneed == -1) {
-        series.push_back(imu0);
-    } else if (isneed == 1) {
-        series.push_back(imu0);
-        series.push_back(imu1);
-    } else if (isneed == 2) {
-        series.push_back(imu0);
-        imuInterpolation(imu1, imu, imu1, end);
+    // Clip each IMU increment to (start, end], including exact sample boundaries.
+    for (size_t k = is; k <= ie; k++) {
+        IMU imu = ins_windows[k].first;
+        double interval_start = std::max(start, ins_windows[k - 1].first.time);
+        double interval_end   = std::min(end, imu.time);
+        if (interval_end <= interval_start) {
+            continue;
+        }
+        double dt    = interval_end - interval_start;
+        double scale = dt / imu.dt;
+        imu.time     = interval_end;
+        imu.dt       = dt;
+        imu.dtheta *= scale;
+        imu.dvel *= scale;
+        imu.odovel *= scale;
         series.push_back(imu);
     }
-    // 显式替换时间
-    series.back().time = end;
 
     return true;
 }
@@ -414,7 +408,7 @@ bool MISC::detectZeroVelocity(const vector<IMU> &imu_buffer, double imudatarate,
     return false;
 }
 
-void MISC::writeNavResult(const IntegrationConfiguration &config, const IntegrationState &state,
+void MISC::writeNavResult(const IntegrationConfiguration &config, const IntegrationState &state, int gps_week,
                           const FileSaver::Ptr &navfile, const FileSaver::Ptr &errfile,
                           const FileSaver::Ptr &trajfile) {
     static int counts = 0;
@@ -438,7 +432,7 @@ void MISC::writeNavResult(const IntegrationConfiguration &config, const Integrat
         // navigation file
         result.clear();
 
-        result.push_back(0);
+        result.push_back(gps_week);
         result.push_back(time);
         result.push_back(pos[0]);
         result.push_back(pos[1]);

@@ -52,7 +52,7 @@ public:
     static void insMechanization(const IntegrationConfiguration &config, const IMU &imu_pre, const IMU &imu_cur,
                                  IntegrationState &state);
     static void redoInsMechanization(const IntegrationConfiguration &config, const IntegrationState &updated_state,
-                                     size_t reserved_ins_num,
+                                     double oldest_required_time,
                                      std::deque<std::pair<IMU, IntegrationState>> &ins_windows);
 
     static int isNeedInterpolation(const IMU &imu0, const IMU &imu1, double mid);
@@ -63,7 +63,7 @@ public:
 
     static bool detectZeroVelocity(const vector<IMU> &imu_buffer, double imudatarate, vector<double> &average);
 
-    static void writeNavResult(const IntegrationConfiguration &config, const IntegrationState &state,
+    static void writeNavResult(const IntegrationConfiguration &config, const IntegrationState &state, int gps_week,
                                const FileSaver::Ptr &navfile, const FileSaver::Ptr &errfile,
                                const FileSaver::Ptr &trajfile);
 
